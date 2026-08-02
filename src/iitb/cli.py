@@ -189,9 +189,8 @@ commands:
   set-default   Set the default download directory.
 
 The setting is shared by every portal, and each portal writes into its own
-folder underneath it, so placements downloads land in
-<default>/placements/. Until a default is set, download commands require
---out.
+folder underneath it. No command downloads a file yet; set this once and it
+will be there when one does.
 """
 
 DOWNLOADS_SET_DEFAULT_HELP = """
