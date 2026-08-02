@@ -121,8 +121,6 @@ fails_with(["placements", "deadlines", "--within", "soon"], 202)
 fails_with(["placements", "blog", "posts", "--since", "yesterday"], 202)
 fails_with(["placements", "blog", "posts", "--page", "0"], 202)
 fails_with(["placements", "blog", "post", "12", "--blog", "alumni"], 202)
-fails_with(["placements", "fetch", "not-a-url"], 202)
-fails_with(["placements", "fetch", "--out"], 201)
 
 # --- --help is text on stdout at exit 0, and it is the verbatim block -------
 
@@ -139,7 +137,6 @@ for argv, block in [
     (["placements", "blog"], cli.PLACEMENTS_BLOG_HELP),
     (["placements", "blog", "posts"], cli.PLACEMENTS_BLOG_POSTS_HELP),
     (["placements", "blog", "post"], cli.PLACEMENTS_BLOG_POST_HELP),
-    (["placements", "fetch"], cli.PLACEMENTS_FETCH_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
     status, text = run(*argv, "--help")
@@ -159,7 +156,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 13, f"the tree has {len(tree)} leaves, expected 13")
+check(len(tree) == 12, f"the tree has {len(tree)} leaves, expected 12")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -173,14 +170,18 @@ fails_with(["placements", "applications"], 498)
 fails_with(["browser", "status"], 498)
 del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
 
-# --- downloads: the setting round-trips, and fetch needs it ----------------
+# --- downloads: the setting round-trips and survives being read back -------
+# No v1 command downloads, so the setting is exercised through the command that
+# writes it and the accessor a download command will read it with, rather than
+# through a consumer that does not exist yet.
 
 with tempfile.TemporaryDirectory() as home:
     real_home = os.environ.get("HOME")
     os.environ["HOME"] = home
     try:
-        # No default configured: fetch is 203 at exit 2, before any network.
-        fails_with(["placements", "fetch", "https://example.invalid/a.pdf"], 203)
+        from iitb import config
+
+        check(config.download_dir() is None, "an unset default should read as None")
 
         target = Path(home) / "Downloads" / "iitb"
         status, body = run("downloads", "set-default", str(target))
@@ -192,8 +193,6 @@ with tempfile.TemporaryDirectory() as home:
         )
         check(body["data"]["created"] is True, "set-default: should have created it")
         check(target.is_dir(), "set-default: directory was not created")
-
-        from iitb import config
 
         check(
             config.download_dir() == target.resolve(),
@@ -211,12 +210,6 @@ with tempfile.TemporaryDirectory() as home:
             stored.get("downloadsDir") == str(target.resolve()),
             f"set-default wrote {sorted(stored)}, not the key the core reads",
         )
-        # With a default set, fetch gets past 203 and reaches the core, which
-        # is absent in this check, so 498 is the right next failure.
-        sys.modules["iitb_core"] = None  # type: ignore[assignment]
-        sys.modules["iitb_core.placements"] = None  # type: ignore[assignment]
-        fails_with(["placements", "fetch", "https://example.invalid/a.pdf"], 498)
-        del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
 
         # A path that is a file, not a directory, is a usage error.
         occupied = Path(home) / "file.txt"
@@ -226,7 +219,11 @@ with tempfile.TemporaryDirectory() as home:
         # Unparseable settings are 190, not a crash and not a silent reset
         # to "no default", which would send a download somewhere unexpected.
         (Path(home) / ".config" / "iitb" / "config.json").write_text("{[", "utf-8")
-        fails_with(["placements", "fetch", "https://example.invalid/a.pdf"], 190)
+        try:
+            config.download_dir()
+            check(False, "unreadable settings did not raise")
+        except CliError as exc:
+            check(exc.code == 190, f"unreadable settings raised {exc.code}, not 190")
     finally:
         if real_home is None:
             os.environ.pop("HOME", None)

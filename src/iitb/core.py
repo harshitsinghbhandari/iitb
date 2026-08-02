@@ -31,7 +31,6 @@ The pinned core seams, one function per command::
     iitb_core.placements.applications()
     iitb_core.placements.blog(post_id=..., blog=..., page=..., since=...,
                              max_pages=..., text=...)
-    iitb_core.placements.fetch(url=..., out=..., download_dir=..., force=...)
 
 Each returns the `data` payload for its command. The shell wraps it in the
 envelope and prints it; it does not reshape it.

@@ -189,9 +189,8 @@ commands:
   set-default   Set the default download directory.
 
 The setting is shared by every portal, and each portal writes into its own
-folder underneath it, so placements downloads land in
-<default>/placements/. Until a default is set, download commands require
---out.
+folder underneath it. No command downloads a file yet; set this once and it
+will be there when one does.
 """
 
 DOWNLOADS_SET_DEFAULT_HELP = """
@@ -226,7 +225,6 @@ commands:
                  one has reached.
   blog           Read the placements blog: announcements and the documents
                  attached to them.
-  fetch          Download a document published on the placements portal.
 
 Every command prints exactly one JSON object on stdout and nothing else.
   success:  {"ok": true, "data": ...}
@@ -280,10 +278,14 @@ options:
   --company TEXT
       Only postings whose company name contains TEXT, case-insensitive.
 
-Each posting carries "eligible", the single yes/no answer, identical to the
-one the portal shows on that row; and "eligibility", the facts behind it, so
-you can tell the operator why a posting is out of reach instead of silently
-dropping it.
+Each posting carries "eligible", the single yes/no answer to "can the operator
+actually apply for this". It is true only when both halves hold: the portal's
+own eligibility decision for them, and the CPI cutoff the posting itself
+states. It is deliberately the stricter of those two readings, so a posting
+they otherwise qualify for still comes back "eligible": false when the CPI is
+below that posting's cutoff. Alongside it, "eligibility" carries the facts
+behind the answer, so you can tell the operator why a posting is out of reach
+instead of silently dropping it.
 
 Eligibility is widened during the day as the placements team opens postings
 to more cohorts. A posting you were ineligible for this morning may be open
@@ -424,44 +426,11 @@ options:
       Return the body as plain text instead of HTML. HTML is the default
       because announcements use tables that do not survive flattening.
 
-"documents" lists every downloadable file linked from the body, each with
-the url to hand to `iitb placements fetch`.
+"documents" lists every downloadable file linked from the body, each with the
+url the file is published at. This CLI does not download it for you.
 
 Post bodies can contain other students' names and roll numbers. Do not write
 a post body into a repository, an issue, a pull request, or any shared log.
-"""
-
-PLACEMENTS_FETCH_HELP = """
-usage: iitb placements fetch <url> [--out PATH] [--force]
-
-Download a document published on the placements portal, such as a policy PDF
-or an announcement attachment.
-
-positional arguments:
-  url
-      Document url, exactly as returned in a "documents" entry by
-      `iitb placements blog post`. A url that does not belong to the
-      placements portal is rejected.
-
-options:
-  --out PATH
-      Where to write the file. If PATH is an existing directory, the file is
-      written into it under its published filename. Otherwise PATH is the
-      filename to write.
-      Without --out, the file goes to the "placements" folder inside your
-      default download directory, which is set once with
-      `iitb downloads set-default`. Until that is set, --out is required.
-  --force
-      Overwrite an existing file. Without it, an existing file is an error
-      and nothing is written.
-
-On success the response gives the absolute path written, the byte count, the
-content type, and a sha256, so a repeated download can be recognised without
-reading the file.
-
-This command never writes a file that is not the document you asked for. If
-it cannot get the real document it fails and writes nothing at all, not even
-a partial file.
 """
 
 BLOG_CHOICES = ("internship", "placement", "phd")
@@ -507,15 +476,6 @@ def iso_date(raw: str) -> str:
         raise argparse.ArgumentTypeError(
             f"{raw!r} is not a date; use YYYY-MM-DD"
         ) from None
-
-
-def document_url(raw: str) -> str:
-    """Shape only. Which hosts are acceptable is the core's to decide."""
-    if not re.match(r"^https?://[^\s/]+", raw):
-        raise argparse.ArgumentTypeError(
-            f"{raw!r} is not an http or https url"
-        )
-    return raw
 
 
 # ----------------------------------------------------------------------
@@ -604,28 +564,6 @@ def placements_blog_posts(args) -> object:
 def placements_blog_post(args) -> object:
     return core.call(
         PLACEMENTS, "blog", post_id=args.post_id, blog=args.blog, text=args.text
-    )
-
-
-def placements_fetch(args) -> object:
-    """Resolve where the file goes before anything is fetched.
-
-    A missing default is 203 at exit 2 and it fires here, before the
-    network, so a misconfigured download never costs a request.
-    """
-    download_dir = None
-    if args.out is None:
-        configured = config.download_dir()
-        if configured is None:
-            raise CliError(203)
-        download_dir = str(configured)
-    return core.call(
-        PLACEMENTS,
-        "fetch",
-        url=args.url,
-        out=args.out,
-        download_dir=download_dir,
-        force=args.force,
     )
 
 
@@ -779,11 +717,6 @@ def _build_placements(top) -> None:
     hidden(post, "post_id", metavar="<post-id>", type=numeric_id)
     hidden(post, "--blog", choices=BLOG_CHOICES, default=None)
     hidden(post, "--text", action="store_true")
-
-    fetch = make(sub, "fetch", PLACEMENTS_FETCH_HELP, placements_fetch)
-    hidden(fetch, "url", metavar="<url>", type=document_url)
-    hidden(fetch, "--out", metavar="PATH", default=None)
-    hidden(fetch, "--force", action="store_true")
 
 
 # ----------------------------------------------------------------------
