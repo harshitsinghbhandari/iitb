@@ -1,9 +1,14 @@
 """Settings that outlive one invocation, under `~/.config/iitb/`.
 
-One setting so far: the default download directory. It lives here rather
-than in the core because it is the operator's preference about their own
-laptop, not portal knowledge, and because `fetch` has to be able to fail
-with 203 before it touches the network.
+One setting so far: the default download directory, written by
+`iitb downloads set-default`. It lives here rather than in the core because
+it is the operator's preference about their own laptop, not portal knowledge,
+and because a download command must be able to fail with 203 before it
+touches the network.
+
+No v1 command downloads anything yet, so nothing reads it back yet. It is
+kept ahead of its first consumer on purpose: the setting is shared by every
+portal, and the next surface to be built is one that downloads.
 
 Never in a repo, never in an environment variable, never prompted for.
 """

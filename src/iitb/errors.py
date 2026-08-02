@@ -16,6 +16,13 @@ in one file instead of being scattered over the commands:
   HTTP status. Anything specific belongs in `detail`, which the core
   produces at runtime and this repo never authors.
 
+Codes 121, 122, 123 and 124, and usage code 203, describe downloading. No v1
+command downloads a file, so only 123 can currently fire (from `downloads
+set-default`). They stay because a code never changes meaning and because
+downloads are the next surface: deleting them would free numbers that must
+never be reused, and re-adding them later is exactly what the permanence rule
+exists to prevent.
+
 Block reservations::
 
     100-109  shared: session, browser, runtime
