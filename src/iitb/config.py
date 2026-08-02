@@ -17,6 +17,13 @@ from .errors import CliError
 
 FILENAME = "config.json"
 
+# The on-disk key, and the one thing in this module that is not ours to choose.
+# The core reads the same file and resolves the same setting itself whenever it
+# is not handed one, so a spelling that differs from the core's is not a cosmetic
+# difference: it silently means the two never see each other's value, and
+# `set-default` stops driving anything the core decides on its own.
+DOWNLOAD_DIR_KEY = "downloadsDir"
+
 
 def config_dir() -> Path:
     # Read at call time, not import time, so a test can point HOME elsewhere.
@@ -35,7 +42,7 @@ def read() -> dict:
 
 def download_dir() -> Path | None:
     """The configured default download directory, or None if unset."""
-    value = read().get("downloadDir")
+    value = read().get(DOWNLOAD_DIR_KEY)
     return Path(value) if value else None
 
 
@@ -57,7 +64,7 @@ def set_download_dir(raw: str) -> dict:
 
     directory = config_dir()
     settings = read()
-    settings["downloadDir"] = str(path)
+    settings[DOWNLOAD_DIR_KEY] = str(path)
     try:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / FILENAME).write_text(
