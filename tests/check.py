@@ -199,6 +199,18 @@ with tempfile.TemporaryDirectory() as home:
             config.download_dir() == target.resolve(),
             "the stored default did not round-trip",
         )
+        # Round-tripping through this module proves nothing about the seam: the
+        # core resolves the same setting out of the same file whenever it is not
+        # handed one, so the key on disk is a shared contract and this pins it.
+        # Spelt differently on the two sides, `set-default` writes a setting the
+        # core never finds, and every check above still passes.
+        stored = json.loads(
+            (Path(home) / ".config" / "iitb" / "config.json").read_text("utf-8")
+        )
+        check(
+            stored.get("downloadsDir") == str(target.resolve()),
+            f"set-default wrote {sorted(stored)}, not the key the core reads",
+        )
         # With a default set, fetch gets past 203 and reaches the core, which
         # is absent in this check, so 498 is the right next failure.
         sys.modules["iitb_core"] = None  # type: ignore[assignment]
