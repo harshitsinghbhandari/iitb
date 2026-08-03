@@ -19,6 +19,16 @@ Exit codes: `0` success, `1` the operation failed, `2` you called the
 command wrong, `3` the operator's IITB single sign-on has ended and only
 they can restore it, `4` the core is missing or incompatible.
 
+That holds on every exit path, not just the ones with a code. Anything
+unexpected comes back as error 105 `internal_error` at exit 1, with the
+traceback appended to a log under `~/.config/iitb/` that the error names, so
+a bug is something a caller can parse and report rather than a silent
+non-zero exit.
+
+`iitb version` reports the installed `iitb` and `iitb-core` versions, which
+are the two numbers a bug report needs. `iitb --version` answers the same
+object and points back at the command.
+
 ## Install
 
 The shell depends on `iitb-core`, which is not published. Clone both repos

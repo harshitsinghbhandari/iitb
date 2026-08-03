@@ -19,6 +19,12 @@ Everything that is printed on the way out:
     --help    plain text                                     exit 0
 
 and nothing else on stdout, ever.
+
+"Ever" is structural rather than aspirational: `main` catches `BaseException`
+below every known mapping, so an exit path nobody planned for still prints one
+parseable object (error 105) instead of exiting non-zero in silence. Silence is
+the single outcome a consumer cannot branch on, because it arrives as a parse
+error on empty input rather than as a name it can read.
 """
 
 from __future__ import annotations
@@ -27,7 +33,9 @@ import argparse
 import json
 import re
 import sys
-from datetime import date
+import traceback
+from datetime import date, datetime, timezone
+from importlib import metadata
 
 from . import config, core
 from .errors import CliError
@@ -48,13 +56,20 @@ commands:
   placements   Read the placements and internships portal: postings, your
                eligibility for them, your applications, and the blog.
   downloads    Configure where downloaded files are written.
+  version      Report the installed iitb and iitb-core versions.
 
 Every command prints exactly one JSON object on stdout and nothing else.
   success:  {"ok": true, "data": ...}
   failure:  {"ok": false, "error": {"code": <3 digits>, "name": ..., "message": ...}}
 
+That holds on every exit path. A failure nobody planned for still comes back
+as one object, error 105 "internal_error" at exit 1, rather than as silence.
+
 `--help` is the one exception: it prints plain text, like this. Run it on
 any command in the tree.
+
+`iitb --version` works too and stays inside the envelope, but `iitb version`
+is the command; the flag is there so that reaching for it is not a dead end.
 
 Exit codes:
   0  success
@@ -72,6 +87,7 @@ Where to start:
   iitb browser sso-status    is the operator signed in?
   iitb placements --help     the placements command tree
   iitb downloads --help      set the default download directory once
+  iitb version               which versions are installed
 
 Portal commands start the browser themselves and restore an expired
 session themselves. You do not need to run anything first, and you should
@@ -298,25 +314,60 @@ The response is complete and unpaginated. Filter and slice it yourself.
 """
 
 PLACEMENTS_JOB_HELP = """
-usage: iitb placements job <job-id> [--text]
+usage: iitb placements job [<job-id>] [--company TEXT --job-code CODE]
+                           [--text]
 
 Show one posting in full: description, eligibility, locations, stipend,
 selection process, and deadline.
+
+Name the posting in one of two ways: by its id, or by the job code the blog
+announces it under together with the company that published it. Give the id,
+or give both --company and --job-code. Any other combination is a usage
+error.
 
 positional arguments:
   job-id
       Numeric posting id, as returned in "jobId" by `iitb placements jobs`,
       `iitb placements deadlines`, or `iitb placements applications`.
-      Posting ids are unique and stable. The "jobCode" on a posting is only
-      unique within one company, so it does not work here.
+      Posting ids are unique and stable.
 
 options:
+  --company TEXT
+      The company to look the job code up within. Matched the same way as on
+      `iitb placements jobs`: the company name contains TEXT,
+      case-insensitively. Required with --job-code.
+  --job-code CODE
+      The "jobCode" a posting carries, as the placements blog writes it. A
+      job code is only unique within one company, which is why --company is
+      required with it. A code that still matches more than one posting is
+      error 115, which lists what it matched rather than guessing.
   --text
       Return description fields as plain text instead of HTML. HTML is the
       default because postings use tables that do not survive flattening.
 
+Blog posts announce shortlists, tests and walk-ins by job code, so this is
+the route from something the blog said to the posting it said it about.
+
 A posting has no attachments of its own. Documents that relate to it are
 published on the placements blog; see `iitb placements blog --help`.
+"""
+
+VERSION_HELP = """
+usage: iitb version
+
+Report the versions of the two packages this CLI is made of.
+
+  {"ok": true, "data": {"iitb": "<version>", "iitb_core": "<version>"}}
+
+"iitb" is this command surface; "iitb_core" is the implementation it calls.
+Both numbers belong at the top of a bug report, because exit 4 means the two
+do not fit together and diagnosing that needs to know which two.
+
+An iitb-core that is not installed is reported here the way it is reported
+everywhere else: error 498 at exit 4, rather than a null version at exit 0.
+
+`iitb --version` prints the same object with a "use" field pointing back at
+this command.
 """
 
 PLACEMENTS_DEADLINES_HELP = """
@@ -532,7 +583,34 @@ def placements_jobs(args) -> object:
 
 
 def placements_job(args) -> object:
-    return core.call(PLACEMENTS, "job", job_id=args.job_id, text=args.text)
+    """One posting, named by id or by company and job code.
+
+    The exclusion is checked here rather than with an argparse mutually
+    exclusive group, because the pair is a unit: argparse can say "not both" or
+    "at least one of", and what this needs is "the id, or the pair, and a half
+    of the pair is not an answer".
+    """
+    if args.job_id is not None and (args.company or args.job_code):
+        raise CliError(
+            204,
+            detail="give a posting id, or --company with --job-code, not both",
+        )
+    if args.job_id is None and not (args.company and args.job_code):
+        raise CliError(
+            201,
+            detail=(
+                "name a posting: a posting id, or --company and --job-code "
+                "together. A job code alone does not identify one."
+            ),
+        )
+    return core.call(
+        PLACEMENTS,
+        "job",
+        job_id=args.job_id,
+        company=args.company,
+        job_code=args.job_code,
+        text=args.text,
+    )
 
 
 def placements_deadlines(args) -> object:
@@ -568,6 +646,42 @@ def placements_blog_post(args) -> object:
 
 
 # ----------------------------------------------------------------------
+# Versions. The one command that answers about the install rather than a
+# portal, and so the one that does not go through the core seam.
+# ----------------------------------------------------------------------
+
+
+def installed(distribution: str) -> str | None:
+    try:
+        return metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def version_data(hint: bool = False) -> dict:
+    """Both versions, or 498 if there is no core to report one for.
+
+    A missing core is the failure this command exists to diagnose, so it is
+    reported as that failure. Answering `"iitb_core": null` at exit 0 would
+    report an install problem as a success, which is exactly the reading that
+    sends someone hunting through `dist-info` directories instead.
+    """
+    core_version = installed("iitb-core")
+    if core_version is None:
+        raise CliError(498, detail="iitb-core is not installed")
+    # No install at all is possible when running straight from a source tree,
+    # which is not a failure: the shell is running, so it is here to be asked.
+    data = {"iitb": installed("iitb") or "unknown", "iitb_core": core_version}
+    if hint:
+        data["use"] = "iitb version"
+    return data
+
+
+def report_version(args) -> dict:
+    return version_data()
+
+
+# ----------------------------------------------------------------------
 # The parser tree
 # ----------------------------------------------------------------------
 
@@ -591,6 +705,30 @@ def usage_code(message: str) -> int:
     if "expected one argument" in text or "expected at least one" in text:
         return 201
     return 202
+
+
+class Answered(Exception):
+    """A payload produced during the parse, ready for the envelope.
+
+    `--version` has to be answered while parsing, the way `--help` is: the root
+    parser requires a subcommand, so a flag on its own is rejected before any
+    handler could run. argparse's own help action raises SystemExit for this;
+    the envelope needs the payload as well, so this carries it out.
+    """
+
+    def __init__(self, data) -> None:
+        self.data = data
+        super().__init__("answered during the parse")
+
+
+class VersionAction(argparse.Action):
+    """`iitb --version`, answered in JSON like everything else."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        raise Answered(version_data(hint=True))
 
 
 class Parser(argparse.ArgumentParser):
@@ -657,11 +795,13 @@ def build_parser() -> Parser:
         add_help=False,
     )
     root.add_argument("-h", "--help", action="help", help=argparse.SUPPRESS)
+    root.add_argument("--version", action=VersionAction, help=argparse.SUPPRESS)
     top = commands(root, "command")
 
     _build_browser(top)
     _build_placements(top)
     _build_downloads(top)
+    make(top, "version", VERSION_HELP, report_version)
     return root
 
 
@@ -694,7 +834,9 @@ def _build_placements(top) -> None:
     hidden(jobs, "--company", metavar="TEXT", default=None)
 
     job = make(sub, "job", PLACEMENTS_JOB_HELP, placements_job)
-    hidden(job, "job_id", metavar="<job-id>", type=numeric_id)
+    hidden(job, "job_id", metavar="<job-id>", type=numeric_id, nargs="?", default=None)
+    hidden(job, "--company", metavar="TEXT", default=None)
+    hidden(job, "--job-code", metavar="CODE", default=None)
     hidden(job, "--text", action="store_true")
 
     deadlines = make(sub, "deadlines", PLACEMENTS_DEADLINES_HELP, placements_deadlines)
@@ -724,23 +866,76 @@ def _build_placements(top) -> None:
 # ----------------------------------------------------------------------
 
 
+INTERNAL_ERROR = 105
+
+
 def emit(payload: dict) -> None:
-    json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
-    sys.stdout.write("\n")
+    """Print one object, built whole before a byte of it is written.
+
+    Serialising first rather than streaming into stdout is what keeps a failed
+    serialisation from printing half an object and then the error object for
+    the failure. Half an object is unparseable, which is the failure mode this
+    whole layer exists to make impossible.
+    """
+    sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def internal_error(exc: BaseException) -> CliError:
+    """Anything at all, as the registry's last-resort failure.
+
+    Only the exception's class name goes in `detail`. An exception's message is
+    whatever it was holding when it died, which on this CLI can be portal data,
+    so the message stays in the log file on the operator's own laptop and the
+    error object names the file.
+    """
+    when = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    where = config.append_traceback(
+        f"--- {when} {' '.join(sys.argv)}\n"
+        + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    )
+    detail = type(exc).__name__
+    if where is not None:
+        detail += f"; traceback appended to {where}"
+    return CliError(INTERNAL_ERROR, detail=detail)
 
 
 def main(argv: list[str] | None = None) -> int:
+    """One JSON object on stdout and one exit code, on every path there is.
+
+    `dispatch` owns the failures that have a code. This layer owns the ones
+    nobody planned for, which are exactly the ones that would otherwise leave
+    stdout empty: an unexpected exception, an interrupt, a `SystemExit` raised
+    at a non-zero code from somewhere below. Each becomes error 105 at exit 1,
+    so what a consumer reads is always a name it can branch on rather than a
+    parse error on nothing.
+    """
+    try:
+        return dispatch(argv)
+    except BaseException as exc:  # noqa: BLE001 - the last resort, on purpose
+        try:
+            emit({"ok": False, "error": internal_error(exc).as_error()})
+        except Exception:  # noqa: BLE001 - stdout itself is gone; nothing to do
+            pass
+        # 105's exit code, written out rather than read from the registry: the
+        # one path that must not depend on anything else still working.
+        return 1
+
+
+def dispatch(argv: list[str] | None) -> int:
     try:
         args = build_parser().parse_args(argv)
         emit({"ok": True, "data": args.handler(args)})
+        return 0
+    except Answered as answer:  # --version, produced during the parse
+        emit({"ok": True, "data": answer.data})
         return 0
     except CliError as err:
         emit({"ok": False, "error": err.as_error()})
         return err.exit_code
     except SystemExit as exc:  # --help printed its text and stopped
-        return int(exc.code or 0)
-    except KeyboardInterrupt:
-        return 1
+        if exc.code:
+            raise  # a non-zero exit with an empty stdout is what 105 is for
+        return 0
 
 
 def run() -> None:

@@ -26,7 +26,7 @@ The pinned core seams, one function per command::
     iitb_core.browser.stop()
 
     iitb_core.placements.jobs(status=..., eligible=..., company=...)
-    iitb_core.placements.job(job_id=..., text=...)
+    iitb_core.placements.job(job_id=..., company=..., job_code=..., text=...)
     iitb_core.placements.deadlines(within=..., eligible=..., include_applied=...)
     iitb_core.placements.applications()
     iitb_core.placements.blog(post_id=..., blog=..., page=..., since=...,
