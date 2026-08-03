@@ -192,11 +192,62 @@ check(
     "unmapped is a result, not a type --include may ask for",
 )
 
+# --- browser login: the seam it calls, and the two answers it maps ---------
+# The command blocks on a human, so the half this repo owns is the wiring on
+# either side of that wait: it calls one core seam with no arguments, a session
+# comes back as a success carrying the user, and a sign-in that never happened
+# is exit 3 with 103, the same code every other surface uses for "go and get
+# the operator". The core is replaced here, so nothing opens a window and
+# nothing waits five minutes for one.
+
+answer: dict = {}
+reached = []
+canonical_call = core.call
+try:
+    core.call = lambda *a, **k: reached.append((a, k)) or answer
+
+    answer = {"logged_in": True, "user": "someone", "detail": "live"}
+    status, body = run("browser", "login")
+    check(status == 0, f"browser login: exit {status} != 0")
+    check(
+        reached == [((cli.BROWSER, "login"), {})],
+        f"browser login called {reached}, not the login seam with no arguments",
+    )
+    check(
+        body.get("data") == {"loggedIn": True, "user": "someone"},
+        f"browser login returned {body.get('data')}, not the session and its user",
+    )
+
+    # Not signed in is not a truthful exit 0 with a false field: an agent must
+    # never have to read a field to find out that it needs a human.
+    answer = {"logged_in": False, "user": None, "detail": "the window was closed"}
+    fails_with(["browser", "login"], 103)
+    status, body = run("browser", "login")
+    check(
+        body.get("error", {}).get("detail") == "the window was closed",
+        "browser login dropped the core's runtime detail",
+    )
+finally:
+    core.call = canonical_call
+
+# The public message is where the operator is told what to run, so the command
+# name has to be in it: a 103 that does not name `iitb browser login` leaves an
+# agent to invent the remedy.
+check(
+    "iitb browser login" in REGISTRY[103][2],
+    "the 103 message does not name `iitb browser login`",
+)
+check(
+    "iitb browser login" in cli.ROOT_HELP,
+    "the root help does not name `iitb browser login`",
+)
+
 # --- --help is text on stdout at exit 0, and it is the verbatim block -------
 
 for argv, block in [
     ([], cli.ROOT_HELP),
     (["browser"], cli.BROWSER_HELP),
+    (["browser", "login"], cli.BROWSER_LOGIN_HELP),
     (["browser", "sso-status"], cli.BROWSER_SSO_STATUS_HELP),
     (["downloads", "set-default"], cli.DOWNLOADS_SET_DEFAULT_HELP),
     (["placements"], cli.PLACEMENTS_HELP),
@@ -233,7 +284,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 18, f"the tree has {len(tree)} leaves, expected 18")
+check(len(tree) == 19, f"the tree has {len(tree)} leaves, expected 19")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")

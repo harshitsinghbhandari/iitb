@@ -67,14 +67,19 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "something the operator needs to do by hand; report it as described "
         "by `iitb placements --help`.",
     ),
-    # The one code in the whole registry that asks a human for anything.
+    # The one code in the whole registry that asks a human for anything, and it
+    # stays one code now that there is a command to point them at. A
+    # `iitb browser login` that ran and ended with no session is this, not a
+    # code of its own: the state it leaves behind is exactly the state this
+    # describes, and minting a second exit 3 would cost every consumer the
+    # single rule that exit 3 means go and get the operator.
     103: (
         "sso_session_ended",
         3,
         "The operator's IITB single sign-on session has ended, and only they "
-        "can restore it. Ask them to sign in to IITB SSO in the iitb browser "
-        "window, then run this command again. Do not attempt to sign in on "
-        "their behalf.",
+        "can restore it. Ask them to run `iitb browser login`, which opens a "
+        "window for them to sign in once, then run this command again. Do not "
+        "attempt to sign in on their behalf.",
     ),
     104: (
         "browser_unavailable",
