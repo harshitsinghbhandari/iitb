@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -80,6 +81,7 @@ exit_three = [code for code, row in REGISTRY.items() if row[1] == 3]
 check(exit_three == [103], f"exit 3 is {exit_three}, expected only [103]")
 check(REGISTRY[103][0] == "sso_session_ended", "103 is not sso_session_ended")
 check(REGISTRY[104][1] == 1, "104 browser_unavailable must be exit 1, not exit 3")
+check(REGISTRY[497][1] == 4, "497 core_incompatible must be exit 4")
 check(REGISTRY[498][1] == 4, "498 core_missing must be exit 4")
 check(REGISTRY[499][1] == 1, "499 core_failed must be exit 1")
 
@@ -300,6 +302,61 @@ fails_with(["browser", "status"], 498)
 fails_with(["moodle", "courses"], 498)
 del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
 del sys.modules["iitb_core.moodle"]
+
+# --- the handshake: one integer, matched exactly, before any seam runs ------
+# The core here is a bare module carrying only API_VERSION, which is the
+# whole point: the handshake must decide from that number alone, before any
+# seam is looked up. Three ways to mismatch, and the detail names the side
+# to update in each, because "update something" is the entire value 497 adds
+# over 498. The direction matters: sending someone to re-download a gated
+# core binary when the fix is `pip install -U iitb` costs them the pipeline
+# for nothing.
+
+canonical_compatible = core._compatible
+try:
+    for api, side in [
+        (core.EXPECTED_CORE_API - 1, "iitb-core"),  # older core
+        (core.EXPECTED_CORE_API + 1, "iitb"),       # newer core: the shell is old
+        (None, "iitb-core"),                        # from before the handshake
+    ]:
+        core._compatible = False
+        fake = types.ModuleType("iitb_core")
+        if api is not None:
+            fake.API_VERSION = api
+        sys.modules["iitb_core"] = fake
+        fails_with(["browser", "status"], 497)
+        status, body = run("browser", "status")
+        detail = body.get("error", {}).get("detail", "")
+        check(
+            detail.endswith(f"update {side}"),
+            f"handshake with core API {api}: detail {detail!r} does not end "
+            f"with the remedy `update {side}`",
+        )
+
+    # A matching core passes, and what fails after that is its own failure:
+    # an absent submodule is still 498, not dressed up as incompatibility.
+    core._compatible = False
+    fake = types.ModuleType("iitb_core")
+    fake.API_VERSION = core.EXPECTED_CORE_API
+    sys.modules["iitb_core"] = fake
+    sys.modules["iitb_core.browser"] = None  # type: ignore[assignment]
+    fails_with(["browser", "status"], 498)
+
+    # A core that fits but predates one seam is 497 per call, and the detail
+    # names both the seam and the side to update.
+    sys.modules["iitb_core.moodle"] = types.ModuleType("iitb_core.moodle")
+    fails_with(["moodle", "courses"], 497)
+    status, body = run("moodle", "courses")
+    check(status == 4, f"a core without the moodle seam exited {status}, not 4")
+    detail = body.get("error", {}).get("detail", "")
+    check(
+        "iitb_core.moodle.courses" in detail and detail.endswith("update iitb-core"),
+        f"a missing seam function reported {detail!r}",
+    )
+finally:
+    core._compatible = canonical_compatible
+    for name in ("iitb_core", "iitb_core.browser", "iitb_core.moodle"):
+        sys.modules.pop(name, None)
 
 # --- downloads: the setting round-trips and survives being read back -------
 # No v1 command downloads, so the setting is exercised through the command that
@@ -528,6 +585,6 @@ if failures:
         print(f"  {failure}", file=sys.stderr)
     sys.exit(1)
 print(
-    "ok: envelope, exit codes, error mapping, parsing, help, downloads, "
-    "version, and one object on every exit path"
+    "ok: envelope, exit codes, error mapping, the core handshake, parsing, "
+    "help, downloads, version, and one object on every exit path"
 )

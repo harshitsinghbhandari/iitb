@@ -35,7 +35,7 @@ Block reservations::
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
     240-269  moodle usage     (reserved; examined and deliberately empty)
-    498-499  core
+    497-499  core
 
 Moodle needs no usage code of its own. Every shape error it can produce is
 already 201, 202, 203 or 204, and its three candidates (an ambiguous course, a
@@ -301,12 +301,22 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "for its usage.",
     ),
     # --- core. Exit 4 is structural and permanent, exit 1 is this run. ---
+    # 497 and 498 split "the install is wrong" by remedy: 498 means there is
+    # no core to speak to, 497 means there is one and the two halves do not
+    # fit together. Only 497 can say which side to update, so folding them
+    # into one code would cost exactly the sentence the consumer needs.
+    497: (
+        "core_incompatible",
+        4,
+        "The installed iitb and iitb-core do not fit together. This is an "
+        "install problem: running the command again will not fix it, and "
+        "`detail` says which of the two to update.",
+    ),
     498: (
         "core_missing",
         4,
-        "iitb-core is missing, or present at a version this iitb does not "
-        "understand. This is an install problem: running the command again "
-        "will not fix it.",
+        "iitb-core is not installed, or could not be imported. This is an "
+        "install problem: running the command again will not fix it.",
     ),
     499: (
         "core_failed",
