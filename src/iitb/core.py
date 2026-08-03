@@ -32,6 +32,13 @@ The pinned core seams, one function per command::
     iitb_core.placements.blog(post_id=..., blog=..., page=..., since=...,
                              max_pages=..., text=...)
 
+    iitb_core.moodle.courses()
+    iitb_core.moodle.course(course_token=..., no_content=..., include=...,
+                            posts=..., text=...)
+    iitb_core.moodle.deadlines(course_token=..., announcements=..., since=...)
+    iitb_core.moodle.grades(course_token=...)
+    iitb_core.moodle.fetch(target=..., out=..., force=...)
+
 Each returns the `data` payload for its command. The shell wraps it in the
 envelope and prints it; it does not reshape it.
 """

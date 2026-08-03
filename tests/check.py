@@ -83,6 +83,18 @@ check(REGISTRY[104][1] == 1, "104 browser_unavailable must be exit 1, not exit 3
 check(REGISTRY[498][1] == 4, "498 core_missing must be exit 4")
 check(REGISTRY[499][1] == 1, "499 core_failed must be exit 1")
 
+# The moodle block. Every one of them is operational: the surface adds no exit
+# 3 and no usage code of its own, which is the property the block was designed
+# around and the one a later edit is most likely to break by promoting a
+# session failure to exit 3.
+for code in range(140, 150):
+    check(code in REGISTRY, f"moodle code {code} is missing from the registry")
+    check(REGISTRY[code][1] == 1, f"moodle code {code} is not exit 1")
+check(
+    not any(240 <= code < 270 for code in REGISTRY),
+    "240-269 is reserved for moodle usage and was ruled deliberately empty",
+)
+
 # --- core exception names map to codes without importing the core -----------
 
 for class_name, expected in [
@@ -93,6 +105,18 @@ for class_name, expected in [
     ("PortalResponseUnexpected", 112),
     ("JobNotFound", 114),
     ("DownloadTargetExists", 124),
+    ("CourseNotFound", 140),
+    ("CourseAmbiguous", 141),
+    ("MoodleUnreachable", 142),
+    # The acronym case, which the naive slug rule gets wrong: this must not
+    # come out as moodle_h_t_t_p_error and fall through to 499.
+    ("MoodleHTTPError", 143),
+    ("MoodleResponseUnexpected", 144),
+    ("MoodleSessionRecoveryFailed", 145),
+    ("CourseStructureUnavailable", 146),
+    ("ActivityNotFound", 147),
+    ("ActivityHasNoFile", 148),
+    ("GradeReportUnavailable", 149),
     ("ConfigUnwritable", 191),
     ("ValueError", 499),
     ("SomethingNobodyNamedYet", 499),
@@ -129,6 +153,45 @@ fails_with(["placements", "blog", "posts", "--since", "yesterday"], 202)
 fails_with(["placements", "blog", "posts", "--page", "0"], 202)
 fails_with(["placements", "blog", "post", "12", "--blog", "alumni"], 202)
 
+# moodle. A course is a string on purpose, so "not a number" is not a usage
+# error here: the positional takes an id or a code and only the live enrolment
+# can tell which. What is a usage error is a missing course, a type that is not
+# a type, a count that is not a count, and the one pair of flags that has no
+# reading. None of these may reach the core.
+fails_with(["moodle"], 200)
+fails_with(["moodle", "nonsense"], 200)
+fails_with(["moodle", "course"], 201)
+fails_with(["moodle", "course", "XX 101", "--include", "nope"], 202)
+# "unmapped" is a result, not a request, so it is not includable either.
+fails_with(["moodle", "course", "XX 101", "--include", "file,unmapped"], 202)
+fails_with(["moodle", "course", "XX 101", "--include", ""], 202)
+fails_with(["moodle", "course", "XX 101", "--no-content", "--include", "file"], 204)
+fails_with(["moodle", "deadlines", "--announcements", "five"], 202)
+fails_with(["moodle", "deadlines", "--announcements", "-1"], 202)
+fails_with(["moodle", "deadlines", "--since", "yesterday"], 202)
+fails_with(["moodle", "fetch"], 201)
+fails_with(["moodle", "fetch", "not-an-id-or-a-url"], 202)
+
+# The values that must survive the parse rather than being rejected by it.
+parsed = cli.build_parser().parse_args(
+    ["moodle", "deadlines", "XX 101", "--announcements", "0"]
+)
+check(parsed.announcements == 0, "--announcements 0 did not survive the parse")
+check(parsed.course == "XX 101", "a course with a space did not survive the parse")
+parsed = cli.build_parser().parse_args(["moodle", "deadlines"])
+check(
+    parsed.announcements == cli.DEFAULT_ANNOUNCEMENTS and parsed.course is None,
+    "deadlines with no argument did not default to every course at the default depth",
+)
+check(
+    cli.include_types(" file , assignment ") == ["file", "assignment"],
+    "--include did not split on commas and strip whitespace",
+)
+check(
+    "unmapped" not in cli.INCLUDE_CHOICES,
+    "unmapped is a result, not a type --include may ask for",
+)
+
 # --- --help is text on stdout at exit 0, and it is the verbatim block -------
 
 for argv, block in [
@@ -144,6 +207,12 @@ for argv, block in [
     (["placements", "blog"], cli.PLACEMENTS_BLOG_HELP),
     (["placements", "blog", "posts"], cli.PLACEMENTS_BLOG_POSTS_HELP),
     (["placements", "blog", "post"], cli.PLACEMENTS_BLOG_POST_HELP),
+    (["moodle"], cli.MOODLE_HELP),
+    (["moodle", "courses"], cli.MOODLE_COURSES_HELP),
+    (["moodle", "course"], cli.MOODLE_COURSE_HELP),
+    (["moodle", "deadlines"], cli.MOODLE_DEADLINES_HELP),
+    (["moodle", "grades"], cli.MOODLE_GRADES_HELP),
+    (["moodle", "fetch"], cli.MOODLE_FETCH_HELP),
     (["version"], cli.VERSION_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
@@ -164,7 +233,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 13, f"the tree has {len(tree)} leaves, expected 13")
+check(len(tree) == 18, f"the tree has {len(tree)} leaves, expected 18")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -174,9 +243,12 @@ for path in tree:
 
 sys.modules["iitb_core"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.placements"] = None  # type: ignore[assignment]
+sys.modules["iitb_core.moodle"] = None  # type: ignore[assignment]
 fails_with(["placements", "applications"], 498)
 fails_with(["browser", "status"], 498)
+fails_with(["moodle", "courses"], 498)
 del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
+del sys.modules["iitb_core.moodle"]
 
 # --- downloads: the setting round-trips and survives being read back -------
 # No v1 command downloads, so the setting is exercised through the command that
@@ -218,6 +290,39 @@ with tempfile.TemporaryDirectory() as home:
             stored.get("downloadsDir") == str(target.resolve()),
             f"set-default wrote {sorted(stored)}, not the key the core reads",
         )
+
+        # `moodle fetch` is the setting's first consumer, and the half of it
+        # this repo owns is: no --out and no default is 203, decided before
+        # anything touches the network. The core is replaced here so that a
+        # regression shows up as "it called the core" rather than as a browser
+        # starting during a check that is supposed to need nothing live.
+        reached = []
+        canonical_call = core.call
+        try:
+            core.call = lambda *a, **k: reached.append((a, k)) or {}
+
+            (Path(home) / ".config" / "iitb" / "config.json").unlink()
+            fails_with(["moodle", "fetch", "12"], 203)
+            check(not reached, "fetch reached the core with nowhere to write")
+
+            run("downloads", "set-default", str(Path(home) / "dl"))
+            status, body = run("moodle", "fetch", "12")
+            check(status == 0, f"fetch with a default configured: exit {status} != 0")
+            check(len(reached) == 1, "fetch with a default did not reach the core")
+            # --out is passed through untouched: resolving it, including the
+            # per-portal subfolder under the default, is the core's job.
+            check(
+                reached and reached[0][1].get("out") is None,
+                "fetch invented an --out instead of leaving the default to the core",
+            )
+            reached.clear()
+            run("moodle", "fetch", "12", "--out", "/tmp/x", "--force")
+            check(
+                reached and reached[0][1] == {"target": "12", "out": "/tmp/x", "force": True},
+                f"fetch passed {reached and reached[0][1]} to the core",
+            )
+        finally:
+            core.call = canonical_call
 
         # A path that is a file, not a directory, is a usage error.
         occupied = Path(home) / "file.txt"

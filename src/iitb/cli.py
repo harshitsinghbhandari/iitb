@@ -55,6 +55,8 @@ commands:
                operator's IITB single sign-on is live.
   placements   Read the placements and internships portal: postings, your
                eligibility for them, your applications, and the blog.
+  moodle       Read Moodle: your enrolled courses, everything inside them,
+               your grades, the files, and what is coming up.
   downloads    Configure where downloaded files are written.
   version      Report the installed iitb and iitb-core versions.
 
@@ -86,6 +88,7 @@ stable slug, so it stays true across renumbering; "error.code" is the
 Where to start:
   iitb browser sso-status    is the operator signed in?
   iitb placements --help     the placements command tree
+  iitb moodle --help         the moodle command tree
   iitb downloads --help      set the default download directory once
   iitb version               which versions are installed
 
@@ -98,7 +101,8 @@ Nothing is cached. Every invocation fetches live, so re-run a command
 instead of reusing an earlier answer.
 
 This CLI only reads. It never applies to a job, withdraws an application,
-uploads anything, or posts a comment.
+uploads anything, posts a comment, starts a quiz attempt, submits an
+assignment, or marks anything done.
 
 Reporting a failure: email dev@theharshitsingh.com. Do not open a GitHub
 issue and do not paste the output into one. A useful report contains portal
@@ -352,6 +356,256 @@ A posting has no attachments of its own. Documents that relate to it are
 published on the placements blog; see `iitb placements blog --help`.
 """
 
+MOODLE_HELP = """
+usage: iitb moodle <command> [options]
+
+Read the IIT Bombay Moodle: your enrolled courses, everything inside them,
+your grades, the files, and what is coming up.
+
+commands:
+  courses     List the courses you are enrolled in this term.
+  course      Show everything visible inside one course: its sections and
+              every activity in them, with content.
+  deadlines   Show what is due: structured due dates, and the announcements
+              that in practice carry the real ones.
+  grades      Show your grades, across all courses or inside one.
+  fetch       Download a file from a course to disk.
+
+Naming a course: every command that takes a course accepts either its
+numeric id or its code, for example "XX 101-2026-1", "XX 101", or "xx101".
+Matching ignores case and spaces. If what you typed matches more than one
+course, the command fails and lists them rather than picking one. Course ids
+change when the institute rebuilds Moodle, so never store one; run
+`iitb moodle courses` and use what it returns now.
+
+Every command prints exactly one JSON object on stdout and nothing else.
+  success:  {"ok": true, "data": ...}
+  failure:  {"ok": false, "error": {"code": <3 digits>, "name": ..., "message": ...}}
+
+Exit codes:
+  0  success
+  1  the operation failed
+  2  you called the command wrong
+  3  the operator's IITB single sign-on has ended and only they can restore
+     it; the error message says exactly what to ask them
+  4  iitb-core is missing or incompatible; this is an install problem
+
+Expired sessions are restored automatically. You will not normally see exit
+3, and you should never ask the operator to sign in, open a page, or click
+anything to make a command work. If a command still fails after that, it is
+a bug, not something the operator can fix by hand.
+
+Reporting a failure: email dev@theharshitsingh.com. Do not open a GitHub
+issue and do not paste the output into one. A useful report contains portal
+data, and a GitHub issue is public and permanent.
+
+Nothing is cached. Every invocation fetches live. Enrolments change during
+the term and course pages change during the week, so re-run a command
+instead of reusing an earlier answer.
+
+This CLI only reads. It never starts a quiz attempt, submits or saves an
+assignment, posts or replies in a forum, marks anything done, or changes an
+enrolment or a setting. Where a command reports that something exists, going
+and doing it is the operator's to do in the browser.
+
+Course pages and announcements can contain other students' names and roll
+numbers. Do not write course content into a repository, an issue, a pull
+request, or any shared log.
+"""
+
+MOODLE_COURSES_HELP = """
+usage: iitb moodle courses
+
+List every course you are currently enrolled in, with its id, code, name and
+term.
+
+Takes no options. The list is complete and unpaginated; filter and slice it
+yourself.
+
+Each course carries:
+  courseId   the numeric id every other command accepts
+  code       the course code, for example "XX 101-2026-1"
+  name       the full course name
+  term       the term the course belongs to
+  state      "upcoming", "current" or "ended", worked out from the course's
+             own start and end dates
+  url        the course page, for the operator to open
+
+Start here. Enrolments sync from the institute roll system through the term,
+so courses appear and disappear mid-semester, and every id in the response
+changes if the institute rebuilds Moodle. Resolve a course from this command
+each time rather than reusing an id you saw earlier.
+
+Two enrolled courses can share a full name and differ only in their code.
+That is not a duplicate; they are separate courses with separate content.
+"""
+
+MOODLE_COURSE_HELP = """
+usage: iitb moodle course <course> [--no-content] [--include TYPE[,TYPE...]]
+                                   [--posts] [--text]
+
+Show everything visible inside one course: every section, and every activity
+in every section, with the content of each one.
+
+positional arguments:
+  course
+      The course, by numeric id or by code. See `iitb moodle --help` for how
+      names are matched.
+
+options:
+  --no-content
+      Return the structure only: every section and activity with its id,
+      name, type and url, and no content at all. This is by far the cheapest
+      form of this command and the right first look at a course you have not
+      seen. Cannot be combined with --include.
+  --include TYPE[,TYPE...]
+      Fetch content only for activities of these types. Everything else
+      still appears, with its id, name, type and url, marked
+      "contentStatus": "skipped". Types: file, page, link, assignment,
+      forum, folder, quiz. Default: all of them.
+  --posts
+      Also fetch every post in every forum discussion. Without it, forums
+      come back with the list of discussions and their reply counts, which
+      is usually what you want. With it, this command costs noticeably more.
+  --text
+      Return descriptions and page bodies as plain text instead of HTML.
+      HTML is the default because course pages use tables and lists that do
+      not survive flattening.
+
+This command is not free, and its cost grows with the number of activities
+in the course. Use --no-content or --include when you do not need
+everything.
+
+Activities come back with a "type": file, page, link, assignment, forum,
+folder or quiz. An activity whose type this version of iitb does not model
+comes back as "unmapped" with its name and url intact, so you can still tell
+the operator it is there and where to find it. That is not an error.
+
+Each activity carries "contentStatus":
+  ok         content was read
+  skipped    you excluded it with --include or --no-content
+  unmapped   this version has no reader for this type; the activity is real
+             and its url works
+  failed     reading this one activity failed; the rest of the response is
+             still good, and "contentError" says what happened
+
+A single activity failing does not fail the command. Check
+counts.contentFailed before telling the operator you have seen everything.
+
+A file's name on Moodle is often not the activity's name, and some files
+have no extension at all. Each file activity reports both, so use "filename"
+when you mean the file and "name" when you mean the activity.
+
+Course content can contain other students' names and roll numbers. Do not
+write it into a repository, an issue, a pull request, or any shared log.
+"""
+
+MOODLE_DEADLINES_HELP = """
+usage: iitb moodle deadlines [<course>] [--announcements N] [--since DATE]
+
+Show what is due. Answers in two separate parts, and you need both.
+
+positional arguments:
+  course
+      Limit to one course, by numeric id or by code. Without it, every
+      course you are enrolled in.
+
+options:
+  --announcements N
+      How many recent announcement threads to return per course. Default: 5.
+      Use 0 to skip announcements entirely and return only structured dates.
+  --since DATE
+      Return every announcement posted on or after DATE (YYYY-MM-DD)
+      instead of a fixed count. Overrides --announcements.
+
+"deadlines" holds structured due dates: dates Moodle itself knows about,
+read off assignments, quizzes and the calendar. "sources" names exactly what
+was checked to build it.
+
+Moodle only has a due date when a course explicitly sets one, and many
+courses never do. An empty "deadlines" list means Moodle has not been told
+about any due date, which is not the same thing as nothing being due.
+
+"announcements" holds the recent posts in each course's Announcements forum,
+in full, with author and time. This is where dated obligations are actually
+written at IIT Bombay: "the test is on Tuesday in the lecture hall", "send
+the form back before the weekend". They are returned exactly as written.
+This command does not turn them into dates and will not guess at one,
+because a wrong timestamp read out to the operator is worse than the
+sentence it came from.
+
+So the answer to "what is due in this course" is two numbers and some
+reading: counts.deadlines and counts.announcements. Report both. "No due
+dates are set in Moodle, but an announcement posted on the 29th says a form
+is due Friday morning" is the answer the operator needs. "Nothing is due" is
+not, and it is what you will say if you only read the first list.
+
+Announcement text can contain other students' names and roll numbers. Do not
+write it into a repository, an issue, a pull request, or any shared log.
+"""
+
+MOODLE_GRADES_HELP = """
+usage: iitb moodle grades [<course>]
+
+Show your grades.
+
+positional arguments:
+  course
+      One course, by numeric id or by code, to get its individual grade
+      items. Without it, one line per enrolled course: the overview.
+
+Every grade cell comes back twice: "gradeText" is exactly what the portal
+shows, and "grade" is that value as a number, or null when it is not a
+number or could not be read with confidence. Trust "gradeText". Use "grade"
+only for arithmetic, and handle null.
+
+A grade of "-" means nothing has been posted for that item yet. It is the
+real state, not missing data, and it is what most of a course looks like
+early in a term.
+"""
+
+MOODLE_FETCH_HELP = """
+usage: iitb moodle fetch <target> [--out PATH] [--force]
+
+Download one file from a course to disk.
+
+positional arguments:
+  target
+      Either the numeric "activityId" of a file activity, or a Moodle file
+      url exactly as returned in a "fileUrl" field by `iitb moodle course`
+      or `iitb moodle deadlines`. A url that is not on Moodle is rejected.
+
+      Use the id for a file activity. Use the url for anything attached to
+      something else: an assignment's attachment, a file in a forum post, an
+      image inside a page. Activity names are not unique inside a course and
+      are not accepted here.
+
+options:
+  --out PATH
+      Where to write the file. If PATH is an existing directory, the file is
+      written into it under its published filename. Otherwise PATH is the
+      filename to write.
+      Without --out, the file goes to the "moodle" folder inside your
+      default download directory, which is set once with
+      `iitb downloads set-default`. Until that is set, --out is required.
+  --force
+      Overwrite an existing file. Without it, an existing file is an error
+      and nothing is written.
+
+The file is written under the name Moodle publishes it as, which is often
+not the activity's name and sometimes has no extension. The name is never
+invented and an extension is never added; the response reports the content
+type so you can tell the operator what the file actually is.
+
+On success the response gives the absolute path written, the byte count, the
+content type, and a sha256, so a repeated download can be recognised without
+reading the file.
+
+This command never writes a file that is not the file you asked for. If it
+cannot get the real file it fails and writes nothing at all, not even a
+partial file.
+"""
+
 VERSION_HELP = """
 usage: iitb version
 
@@ -487,6 +741,19 @@ a post body into a repository, an issue, a pull request, or any shared log.
 BLOG_CHOICES = ("internship", "placement", "phd")
 STATUS_CHOICES = ("open", "closing-today", "closed", "all")
 
+# The activity types `--include` accepts. These are the student's own words for
+# things on a course page, they are the whole discoverability of the flag, and
+# the help block lists them, so they are public. "unmapped" is deliberately not
+# one of them: it is a result, not a request, and accepting it would imply
+# content can be fetched for a type this version has already said it cannot
+# read.
+INCLUDE_CHOICES = ("file", "page", "link", "assignment", "forum", "folder", "quiz")
+
+# Announcement threads per course when --announcements is not given. Held here
+# rather than read from the core, because it is a number the help block states
+# and this repo owns every string in that block.
+DEFAULT_ANNOUNCEMENTS = 5
+
 # ----------------------------------------------------------------------
 # Argument types. Every value the shell can reject itself, it rejects here,
 # so a usage error never costs a network round trip.
@@ -520,6 +787,48 @@ def duration(raw: str) -> int:
     return int(match.group(1)) * _SECONDS[match.group(2)]
 
 
+def whole_number(raw: str) -> int:
+    """A count that may legitimately be zero.
+
+    Separate from `positive_int` because `--announcements 0` is a real request:
+    it suppresses the announcements bucket and returns the structured dates
+    alone, which is what an agent that only wants the first list should say.
+    """
+    if not raw.isdigit():
+        raise argparse.ArgumentTypeError(f"{raw!r} is not a whole number 0 or above")
+    return int(raw)
+
+
+def include_types(raw: str) -> list[str]:
+    """`--include file,assignment` into a list, rejecting anything not a type."""
+    values = [part.strip() for part in raw.split(",") if part.strip()]
+    if not values:
+        raise argparse.ArgumentTypeError("no activity type was given")
+    unknown = [value for value in values if value not in INCLUDE_CHOICES]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"{', '.join(unknown)} is not an activity type; the types are "
+            f"{', '.join(INCLUDE_CHOICES)}"
+        )
+    return values
+
+
+def fetch_target(raw: str) -> str:
+    """Digits, or something url-shaped. Nothing else reaches the core.
+
+    Shape only. Whether a url is one this CLI will download from is the core's
+    to decide, because which host that is portal knowledge and does not live in
+    this repo. Checking the shape here is still worth it: it turns
+    `iitb moodle fetch nonsense` into a usage error instead of a browser start.
+    """
+    text = raw.strip()
+    if not text or not (text.isdigit() or "://" in text):
+        raise argparse.ArgumentTypeError(
+            f"{raw!r} is neither a numeric activity id nor a file url"
+        )
+    return text
+
+
 def iso_date(raw: str) -> str:
     try:
         return date.fromisoformat(raw).isoformat()
@@ -536,6 +845,7 @@ def iso_date(raw: str) -> str:
 
 BROWSER = "iitb_core.browser"
 PLACEMENTS = "iitb_core.placements"
+MOODLE = "iitb_core.moodle"
 
 
 def browser_start(args) -> dict:
@@ -642,6 +952,66 @@ def placements_blog_posts(args) -> object:
 def placements_blog_post(args) -> object:
     return core.call(
         PLACEMENTS, "blog", post_id=args.post_id, blog=args.blog, text=args.text
+    )
+
+
+def moodle_courses(args) -> object:
+    return core.call(MOODLE, "courses")
+
+
+def moodle_course(args) -> object:
+    """One course, whole.
+
+    The one thing decided here rather than passed through: `--no-content` says
+    fetch nothing and `--include` says fetch a subset, so the pair has no
+    reading. Refusing is one flag away from resolution; guessing is not.
+    """
+    if args.no_content and args.include:
+        raise CliError(
+            204,
+            detail=(
+                "--no-content fetches no content and --include fetches a "
+                "subset of it; give one or the other"
+            ),
+        )
+    return core.call(
+        MOODLE,
+        "course",
+        course_token=args.course,
+        no_content=args.no_content,
+        include=args.include,
+        posts=args.posts,
+        text=args.text,
+    )
+
+
+def moodle_deadlines(args) -> object:
+    return core.call(
+        MOODLE,
+        "deadlines",
+        course_token=args.course,
+        announcements=args.announcements,
+        since=args.since,
+    )
+
+
+def moodle_grades(args) -> object:
+    return core.call(MOODLE, "grades", course_token=args.course)
+
+
+def moodle_fetch(args) -> object:
+    """The first command in this CLI that writes a file.
+
+    The one check the shell owns: with no `--out` and no default download
+    directory there is nowhere to write, and that is knowable here, with no
+    portal involved. Deciding it now is what makes the promise in the help text
+    true, that this fails before the network rather than after downloading a
+    file it then has nowhere to put.
+    """
+    if args.out is None and config.download_dir() is None:
+        raise CliError(203)
+    return core.call(
+        MOODLE, "fetch", target=args.target, out=args.out, force=args.force
     )
 
 
@@ -800,6 +1170,7 @@ def build_parser() -> Parser:
 
     _build_browser(top)
     _build_placements(top)
+    _build_moodle(top)
     _build_downloads(top)
     make(top, "version", VERSION_HELP, report_version)
     return root
@@ -859,6 +1230,52 @@ def _build_placements(top) -> None:
     hidden(post, "post_id", metavar="<post-id>", type=numeric_id)
     hidden(post, "--blog", choices=BLOG_CHOICES, default=None)
     hidden(post, "--text", action="store_true")
+
+
+def _build_moodle(top) -> None:
+    """Five leaves, and nothing mutating is reachable from any of them.
+
+    A course is a plain string here, not a `numeric_id`: the positional takes
+    an id or a code, and which one it is is the core's to work out against the
+    live enrolment. Rejecting a non-numeric course here would make the whole
+    addressing rule unreachable.
+    """
+    moodle = make(top, "moodle", MOODLE_HELP)
+    sub = commands(moodle, "subcommand")
+
+    make(sub, "courses", MOODLE_COURSES_HELP, moodle_courses)
+
+    course = make(sub, "course", MOODLE_COURSE_HELP, moodle_course)
+    hidden(course, "course", metavar="<course>")
+    hidden(course, "--no-content", action="store_true")
+    hidden(
+        course,
+        "--include",
+        metavar="TYPE[,TYPE...]",
+        type=include_types,
+        default=None,
+    )
+    hidden(course, "--posts", action="store_true")
+    hidden(course, "--text", action="store_true")
+
+    deadlines = make(sub, "deadlines", MOODLE_DEADLINES_HELP, moodle_deadlines)
+    hidden(deadlines, "course", metavar="<course>", nargs="?", default=None)
+    hidden(
+        deadlines,
+        "--announcements",
+        metavar="N",
+        type=whole_number,
+        default=DEFAULT_ANNOUNCEMENTS,
+    )
+    hidden(deadlines, "--since", metavar="DATE", type=iso_date, default=None)
+
+    grades = make(sub, "grades", MOODLE_GRADES_HELP, moodle_grades)
+    hidden(grades, "course", metavar="<course>", nargs="?", default=None)
+
+    fetch = make(sub, "fetch", MOODLE_FETCH_HELP, moodle_fetch)
+    hidden(fetch, "target", metavar="<target>", type=fetch_target)
+    hidden(fetch, "--out", metavar="PATH", default=None)
+    hidden(fetch, "--force", action="store_true")
 
 
 # ----------------------------------------------------------------------
