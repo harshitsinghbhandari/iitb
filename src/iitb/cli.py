@@ -51,8 +51,8 @@ Read IIT Bombay portals from the command line. Built for agents: every
 command prints one JSON object and nothing else.
 
 commands:
-  browser      Run the browser this CLI owns, and check whether the
-               operator's IITB single sign-on is live.
+  browser      Run the headless browser this CLI owns, sign the operator
+               in once, and check whether that sign-on is still live.
   placements   Read the placements and internships portal: postings, your
                eligibility for them, your applications, and the blog.
   moodle       Read Moodle: your enrolled courses, everything inside them,
@@ -78,7 +78,7 @@ Exit codes:
   1  the operation failed
   2  you called the command wrong
   3  the operator's IITB single sign-on has ended and only they can restore
-     it; the error message says exactly what to ask them
+     it, by running `iitb browser login` and signing in once
   4  iitb-core is missing or incompatible; this is an install problem
 
 Branch on the exit code first and "error.name" second. "error.name" is a
@@ -87,15 +87,18 @@ stable slug, so it stays true across renumbering; "error.code" is the
 
 Where to start:
   iitb browser sso-status    is the operator signed in?
+  iitb browser login         open a window so they sign in once
   iitb placements --help     the placements command tree
   iitb moodle --help         the moodle command tree
   iitb downloads --help      set the default download directory once
   iitb version               which versions are installed
 
 Portal commands start the browser themselves and restore an expired
-session themselves. You do not need to run anything first, and you should
+session themselves. The browser is headless, so nothing appears on the
+operator's screen. You do not need to run anything first, and you should
 never ask the operator to sign in, open a page, or click anything to make
-a command work unless a command exits 3.
+a command work unless a command exits 3. On an exit 3, the one thing to
+ask them for is `iitb browser login`.
 
 Nothing is cached. Every invocation fetches live, so re-run a command
 instead of reusing an earlier answer.
@@ -116,10 +119,15 @@ Run the browser this CLI owns, and check whether the operator's IITB single
 sign-on session is live.
 
 The CLI drives its own Chrome with its own profile, kept apart from the
-operator's everyday browser. The operator signs in to IITB SSO in that
-window once, by hand, and every later command rides that session.
+operator's everyday browser. It runs headless, so nothing appears on the
+operator's screen while a command works.
+
+`iitb browser login` is the one exception, and the one thing the operator
+ever has to do: it opens a visible window, they sign in to IITB SSO once by
+hand, and every later command rides that session with no window at all.
 
 commands:
+  login        Open a window so the operator signs in once. Headful.
   start        Start the iitb browser, or report the one already running.
   attach       Report the running iitb browser without starting one.
   status       Report whether the iitb browser is running.
@@ -131,8 +139,33 @@ Portal commands start the browser themselves when they need it, so
 are for checking on the runtime and for shutting it down.
 
 This CLI never signs in. It does not type a password, a one-time code, or
-a captcha, and it must not be asked to. When there is no session it says
-so and stops; restoring it is the operator's to do.
+a captcha, and it must not be asked to. `iitb browser login` opens the
+window and then waits: the typing is the operator's, all of it. When there
+is no session the CLI says so and stops.
+"""
+
+BROWSER_LOGIN_HELP = """
+usage: iitb browser login
+
+Open a visible browser window so the operator signs in to IITB SSO once.
+
+This is the only command that shows a window, and the only one that needs a
+human. Everything else runs headless against the session this establishes,
+which lives in the browser's own profile and outlives the window.
+
+Run this when a command exits 3. Then re-run that command.
+
+  signed in    exit 0, {"ok": true, "data": {"loggedIn": true, "user": ...}}
+  not signed   exit 3, error 103. The window was open and no session
+               appeared, so nothing changed. Run it again.
+
+The window opens on the IITB sign-in page and then this waits, for up to
+five minutes, watching for a session to appear. It does not type, click,
+or submit anything: the password, the one-time code and the captcha are
+the operator's, and this CLI must never be asked to enter them.
+
+If a session is already live this returns straight away, so it is safe to
+run when you are not sure.
 """
 
 BROWSER_START_HELP = """
@@ -140,9 +173,10 @@ usage: iitb browser start
 
 Start the iitb browser and report how to reach it.
 
-Idempotent: if the browser is already up this reuses it rather than
-starting a second one, and "launched" comes back false. The profile is
-persistent, so a sign-in survives a stop and a later start.
+Headless: no window appears. Idempotent: if the browser is already up this
+reuses it rather than starting a second one, and "launched" comes back
+false. The profile is persistent, so a sign-in survives a stop and a later
+start.
 
 Fails with error 104 if Chrome cannot be started or reached.
 """
@@ -178,8 +212,8 @@ the iitb browser if it is not already running, because the session lives in
 that browser's profile.
 
   session live   exit 0, {"ok": true, "data": {"loggedIn": true, ...}}
-  no session     exit 3, error 103. The message says exactly what to ask
-                 the operator. Only they can fix it.
+  no session     exit 3, error 103. Ask the operator to run
+                 `iitb browser login`. Only they can fix it.
   check failed   exit 1, error 170. The session state is unknown, which is
                  not the same as ended: do not send the operator to sign in
                  on a 170.
@@ -255,7 +289,7 @@ Exit codes:
   1  the operation failed
   2  you called the command wrong
   3  the operator's IITB single sign-on has ended and only they can restore
-     it; the error message says exactly what to ask them
+     it, by running `iitb browser login` and signing in once
   4  iitb-core is missing or incompatible; this is an install problem
 
 Expired sessions are restored automatically. You will not normally see exit
@@ -387,7 +421,7 @@ Exit codes:
   1  the operation failed
   2  you called the command wrong
   3  the operator's IITB single sign-on has ended and only they can restore
-     it; the error message says exactly what to ask them
+     it, by running `iitb browser login` and signing in once
   4  iitb-core is missing or incompatible; this is an install problem
 
 Expired sessions are restored automatically. You will not normally see exit
@@ -864,6 +898,23 @@ def browser_stop(args) -> dict:
     return core.call(BROWSER, "stop")
 
 
+def browser_login(args) -> dict:
+    """Hand the operator a window, wait for them, report where they ended up.
+
+    The same shape `sso-status` returns, and the same rule about exit 3: this
+    fails with 103 when the sign-in was not completed, because the state after
+    it is the state 103 describes. A session that was already live comes back
+    immediately and is a plain success, so running this when unsure is free.
+
+    The wait itself is the core's. This blocks until it answers, which is a
+    human's worth of time, and nothing is printed until it does.
+    """
+    data = core.call(BROWSER, "login")
+    if not data.get("logged_in"):
+        raise CliError(103, detail=data.get("detail"))
+    return {"loggedIn": True, "user": data.get("user")}
+
+
 def browser_sso_status(args) -> dict:
     """Report the session, or exit 3 when only the operator can fix it.
 
@@ -1179,6 +1230,7 @@ def build_parser() -> Parser:
 def _build_browser(top) -> None:
     browser = make(top, "browser", BROWSER_HELP)
     sub = commands(browser, "subcommand")
+    make(sub, "login", BROWSER_LOGIN_HELP, browser_login)
     make(sub, "start", BROWSER_START_HELP, browser_start)
     make(sub, "attach", BROWSER_ATTACH_HELP, browser_attach)
     make(sub, "status", BROWSER_STATUS_HELP, browser_status)

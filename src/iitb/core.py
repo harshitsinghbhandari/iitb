@@ -23,6 +23,7 @@ The pinned core seams, one function per command::
     iitb_core.browser.attach()
     iitb_core.browser.status()
     iitb_core.browser.sso_status()
+    iitb_core.browser.login()
     iitb_core.browser.stop()
 
     iitb_core.placements.jobs(status=..., eligible=..., company=...)
