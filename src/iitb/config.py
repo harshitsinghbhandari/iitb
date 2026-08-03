@@ -10,9 +10,11 @@ The same root also holds the internal-error log, for the same reason the
 setting is here: it is state on the operator's laptop, it is never in a repo,
 and this module is the one place that knows where that root is.
 
-No v1 command downloads anything yet, so nothing reads it back yet. It is
-kept ahead of its first consumer on purpose: the setting is shared by every
-portal, and the next surface to be built is one that downloads.
+`iitb moodle fetch` is its first consumer, and reads it here rather than
+leaving it to the core for one reason: with no `--out` and no default there is
+nowhere to write, and that is knowable before anything touches the network. A
+203 decided here fails immediately; a 203 decided after the file is in hand
+fails just as truthfully but has already paid for the download.
 
 Never in a repo, never in an environment variable, never prompted for.
 """

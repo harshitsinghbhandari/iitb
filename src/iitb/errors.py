@@ -16,24 +16,33 @@ in one file instead of being scattered over the commands:
   HTTP status. Anything specific belongs in `detail`, which the core
   produces at runtime and this repo never authors.
 
-Codes 121, 122, 123 and 124, and usage code 203, describe downloading. No v1
-command downloads a file, so only 123 can currently fire (from `downloads
-set-default`). They stay because a code never changes meaning and because
-downloads are the next surface: deleting them would free numbers that must
-never be reused, and re-adding them later is exactly what the permanence rule
-exists to prevent.
+Codes 121, 122, 123 and 124, and usage code 203, describe downloading. They
+were minted for placements, which then shipped no command that downloads, and
+kept on the rule that a code never changes meaning and its number is never
+freed for reuse. `iitb moodle fetch` is the consumer they were kept for. Their
+names say "document" where moodle says "file", which is a wording mismatch and
+not a meaning one, so they are reused as written: minting `file_fetch_failed`
+alongside `document_fetch_failed` would give the CLI two codes for one
+condition, which is the one thing a registry exists to prevent.
 
 Block reservations::
 
     100-109  shared: session, browser, runtime, and the shell itself
     110-139  placements
-    140-169  moodle          (reserved, undefined)
+    140-169  moodle           (140-149 defined, 150-169 free)
     170-189  browser
     190-199  shared: config and downloads
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
-    240-269  moodle usage     (reserved)
+    240-269  moodle usage     (reserved; examined and deliberately empty)
     498-499  core
+
+Moodle needs no usage code of its own. Every shape error it can produce is
+already 201, 202, 203 or 204, and its three candidates (an ambiguous course, a
+fetch target that is not a file, an activity type with no reader) are existence
+questions rather than shape ones, which are exit 1 by the standing rule: shape
+is usage, existence is operational. Recorded rather than left silent, so an
+implementer finding an empty reserved block knows it was examined.
 """
 
 from __future__ import annotations
@@ -156,6 +165,80 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         1,
         "That file already exists, so nothing was written. Pass --force to "
         "overwrite it, or --out to write somewhere else.",
+    ),
+    # --- 140 to 169: moodle operations ----------------------------------
+    # All exit 1. None of them is exit 3 and none of them asks a human for
+    # anything: exit 3 stays one code with one meaning across the whole CLI,
+    # and that code is 103. A moodle session that has lapsed while the
+    # operator's sign-on is still alive is the ordinary path, restored before
+    # anything is printed; a restoration that then fails is 145, never 103.
+    140: (
+        "course_not_found",
+        1,
+        "No course you are enrolled in matches that. Run `iitb moodle courses` "
+        "to see what you are enrolled in now; the list changes during the term.",
+    ),
+    141: (
+        "course_ambiguous",
+        1,
+        "More than one of your courses matches that name. `detail` lists them; "
+        "name one by its numeric id instead.",
+    ),
+    142: (
+        "moodle_unreachable",
+        1,
+        "Could not reach Moodle. Check the network and try again.",
+    ),
+    143: (
+        "moodle_http_error",
+        1,
+        "Moodle answered with an error. Try again; if it keeps happening, "
+        "report it as described by `iitb moodle --help`.",
+    ),
+    144: (
+        "moodle_response_unexpected",
+        1,
+        "Moodle returned something this version of iitb does not understand. "
+        "Retrying will not help. Report it as described by "
+        "`iitb moodle --help`.",
+    ),
+    145: (
+        "moodle_session_recovery_failed",
+        1,
+        "Could not establish a Moodle session. This is not something the "
+        "operator needs to do by hand; report it as described by "
+        "`iitb moodle --help`.",
+    ),
+    # Scoped to one course, which is what separates it from 144: a different
+    # course may still work. It is also the only failure inside an enumeration
+    # that fails the command, because per-activity failures are reported in-band.
+    146: (
+        "course_structure_unavailable",
+        1,
+        "Could not read the contents of that course. Other courses may still "
+        "work. If it keeps happening, report it as described by "
+        "`iitb moodle --help`.",
+    ),
+    147: (
+        "activity_not_found",
+        1,
+        "No activity you can see has that id. Activity ids change when the "
+        "institute rebuilds Moodle; run `iitb moodle course <course>` again "
+        "and use an id from the fresh response.",
+    ),
+    # Exit 1 rather than a usage code on purpose: the argument was well formed
+    # and the thing simply is not a file.
+    148: (
+        "activity_has_no_file",
+        1,
+        "That activity is not a file, so there is nothing to download. "
+        "`iitb moodle course <course>` shows what each activity is.",
+    ),
+    149: (
+        "grade_report_unavailable",
+        1,
+        "Could not read your grades. If it keeps happening, report it as "
+        "described by `iitb moodle --help`.",
     ),
     # --- 170 to 189: browser --------------------------------------------
     # Deliberately not 103. A check that could not run is not a session that
