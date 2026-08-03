@@ -116,6 +116,13 @@ fails_with(["placements"], 200)
 fails_with(["placements", "nonsense"], 200)
 fails_with(["placements", "job"], 201)
 fails_with(["placements", "job", "not-a-number"], 202)
+# A posting is named by id, or by company and job code together. Half of the
+# pair is 201 and both routes at once is 204, and neither reaches the core.
+fails_with(["placements", "job", "--job-code", "7"], 201)
+fails_with(["placements", "job", "--company", "acme"], 201)
+fails_with(["placements", "job", "12", "--job-code", "7"], 204)
+fails_with(["placements", "job", "12", "--company", "acme"], 204)
+fails_with(["placements", "job", "12", "--company", "acme", "--job-code", "7"], 204)
 fails_with(["placements", "jobs", "--status", "sideways"], 202)
 fails_with(["placements", "deadlines", "--within", "soon"], 202)
 fails_with(["placements", "blog", "posts", "--since", "yesterday"], 202)
@@ -137,6 +144,7 @@ for argv, block in [
     (["placements", "blog"], cli.PLACEMENTS_BLOG_HELP),
     (["placements", "blog", "posts"], cli.PLACEMENTS_BLOG_POSTS_HELP),
     (["placements", "blog", "post"], cli.PLACEMENTS_BLOG_POST_HELP),
+    (["version"], cli.VERSION_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
     status, text = run(*argv, "--help")
@@ -156,7 +164,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 12, f"the tree has {len(tree)} leaves, expected 12")
+check(len(tree) == 13, f"the tree has {len(tree)} leaves, expected 13")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -230,6 +238,109 @@ with tempfile.TemporaryDirectory() as home:
         else:
             os.environ["HOME"] = real_home
 
+# --- version is JSON on both routes, and --version points at the command ---
+
+# This check runs with nothing installed as happily as it runs inside the
+# install, and `version` answers differently in the two: an absent core is 498
+# at exit 4, which is the failure the command exists to diagnose rather than a
+# null version reported as a success. Both readings are checked, whichever one
+# the environment running this is in.
+
+if cli.installed("iitb-core") is None:
+    fails_with(["version"], 498)
+    fails_with(["--version"], 498)
+else:
+    status, body = run("version")
+    check(status == 0, f"version: exit {status} != 0")
+    check(body.get("ok") is True, "version: envelope is not a success")
+    check(
+        set(body.get("data", {})) == {"iitb", "iitb_core"},
+        f"version: data is {sorted(body.get('data', {}))}, not both versions",
+    )
+
+    status, flagged = run("--version")
+    check(status == 0, f"--version: exit {status} != 0")
+    check(flagged.get("ok") is True, "--version: envelope is not a success")
+    check(
+        flagged.get("data", {}).get("use") == "iitb version",
+        "--version does not point at the canonical command",
+    )
+    check(
+        flagged.get("data", {}).get("iitb_core") == body.get("data", {}).get("iitb_core"),
+        "--version and `version` disagree about the core version",
+    )
+
+# --version must never fall through to unknown_command, installed or not.
+status, body = run("--version")
+check(
+    body.get("error", {}).get("name") != "unknown_command",
+    "--version fell through to unknown_command",
+)
+check("iitb version" in cli.ROOT_HELP, "`iitb version` is not in the root help")
+check("--version" in cli.ROOT_HELP, "`--version` is not in the root help")
+check("iitb version" in cli.VERSION_HELP, "the version help does not name its command")
+
+# --- every exit path prints one object, including the ones nobody planned --
+# The defect this guards against is a non-zero exit with zero bytes on stdout:
+# the consumer gets a parse error on empty input instead of `error.name`, and
+# cannot tell "ask the operator" from "bad install" from "retry". So the check
+# is not that a known failure maps correctly (above), it is that an *unknown*
+# one is still an object. Each raise below is a different way of leaving
+# through the floor.
+
+for label, raised in [
+    ("an unexpected exception", RuntimeError("boom")),
+    ("an interrupt", KeyboardInterrupt()),
+    ("a bare non-zero exit", SystemExit(7)),
+]:
+    with tempfile.TemporaryDirectory() as home:
+        real_home = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        canonical = cli.report_version
+        try:
+            def explode(args, _raised=raised):
+                raise _raised
+
+            cli.report_version = explode
+            status, body = run("version")
+        finally:
+            cli.report_version = canonical
+            if real_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = real_home
+
+        check(isinstance(body, dict), f"{label}: stdout is not one JSON object")
+        error = body.get("error", {}) if isinstance(body, dict) else {}
+        check(body.get("ok") is False if isinstance(body, dict) else False,
+              f"{label}: envelope is not a failure")
+        check(error.get("code") == 105, f"{label}: code {error.get('code')} != 105")
+        check(error.get("name") == "internal_error", f"{label}: name is not internal_error")
+        check(status == 1, f"{label}: exit {status} != 1")
+        check(
+            error.get("detail", "").startswith(type(raised).__name__),
+            f"{label}: detail does not name the exception class",
+        )
+        log = Path(home) / ".config" / "iitb" / "logs" / "internal-error.log"
+        check(log.is_file(), f"{label}: no traceback was logged")
+        check(str(log) in error.get("detail", ""), f"{label}: detail does not name the log")
+        if log.is_file():
+            check(
+                type(raised).__name__ in log.read_text(encoding="utf-8"),
+                f"{label}: the log does not carry the traceback",
+            )
+
+# A payload the envelope cannot serialise prints the failure, not half an
+# object followed by it. Streaming the JSON straight into stdout would.
+canonical = cli.report_version
+try:
+    cli.report_version = lambda args: {"unserialisable": object()}
+    status, body = run("version")
+finally:
+    cli.report_version = canonical
+check(isinstance(body, dict), "an unserialisable payload did not print one object")
+check(status == 1, f"an unserialisable payload exited {status}, not 1")
+
 # --- a CliError carries detail only when there is one ----------------------
 
 check("detail" not in CliError(103).as_error(), "an empty detail should be dropped")
@@ -260,4 +371,7 @@ if failures:
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
     sys.exit(1)
-print("ok: envelope, exit codes, error mapping, parsing, help, downloads")
+print(
+    "ok: envelope, exit codes, error mapping, parsing, help, downloads, "
+    "version, and one object on every exit path"
+)

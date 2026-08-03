@@ -25,7 +25,7 @@ exists to prevent.
 
 Block reservations::
 
-    100-109  shared: session, browser, runtime
+    100-109  shared: session, browser, runtime, and the shell itself
     110-139  placements
     140-169  moodle          (reserved, undefined)
     170-189  browser
@@ -73,6 +73,18 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "Could not start the iitb browser. Run `iitb browser status` to see "
         "why.",
     ),
+    # The last resort, and the only code no command raises on purpose. It is
+    # what makes "exactly one JSON object per invocation" structural rather than
+    # incidental: anything unexpected on any exit path becomes this instead of a
+    # silent non-zero exit, which is the one outcome an agent cannot branch on.
+    105: (
+        "internal_error",
+        1,
+        "iitb failed in a way it has no code for. This is a bug in iitb, not "
+        "something the operator can fix; report it as described by "
+        "`iitb --help`. The traceback was written to a log file under "
+        "~/.config/iitb/, and `detail` names it.",
+    ),
     # --- 110 to 139: placements operations ------------------------------
     110: (
         "portal_unreachable",
@@ -99,11 +111,21 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "The placements portal is rate limiting this session. Wait and try "
         "again.",
     ),
+    # Worded for both ways of naming a posting: by id, and by company and job
+    # code. The code means what it always meant, "that posting is not here";
+    # only the sentence stopped assuming an id was how you asked for it.
     114: (
         "job_not_found",
         1,
-        "No posting with that id in this season. List the postings that do "
-        "exist with `iitb placements jobs --status all`.",
+        "No such posting in this season. List the postings that do exist with "
+        "`iitb placements jobs --status all`.",
+    ),
+    115: (
+        "job_code_ambiguous",
+        1,
+        "That job code matches more than one posting, so it does not name a "
+        "single one. `detail` lists what it matched; ask for one of them by "
+        "its posting id.",
     ),
     120: (
         "blog_post_not_found",
