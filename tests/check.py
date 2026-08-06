@@ -75,11 +75,20 @@ for code, (name, exit_code, message) in REGISTRY.items():
         f"code {code} exits {exit_code}, which does not match the 2xx block",
     )
 
-# Exit 3 is one code across the whole surface: an agent needs a single rule,
-# which is that exit 3 means go and get the operator.
-exit_three = [code for code, row in REGISTRY.items() if row[1] == 3]
-check(exit_three == [103], f"exit 3 is {exit_three}, expected only [103]")
+# Exit 3 means one thing across the whole surface: go and get the operator.
+# Three codes now say it, and each one has to name the command that fixes it,
+# because they do not have the same remedy. A mail failure that sent someone to
+# `iitb browser login` would be a remedy that cannot work, told confidently.
+exit_three = sorted(code for code, row in REGISTRY.items() if row[1] == 3)
+check(exit_three == [103, 150, 151], f"exit 3 is {exit_three}, expected [103, 150, 151]")
 check(REGISTRY[103][0] == "sso_session_ended", "103 is not sso_session_ended")
+check("iitb browser login" in REGISTRY[103][2], "103 does not name its remedy")
+for code in (150, 151):
+    check("iitb mail login" in REGISTRY[code][2], f"{code} does not name its remedy")
+    check(
+        "iitb browser login" not in REGISTRY[code][2],
+        f"{code} sends the operator to the browser, which cannot fix mail",
+    )
 check(REGISTRY[104][1] == 1, "104 browser_unavailable must be exit 1, not exit 3")
 check(REGISTRY[497][1] == 4, "497 core_incompatible must be exit 4")
 check(REGISTRY[498][1] == 4, "498 core_missing must be exit 4")
@@ -95,6 +104,20 @@ for code in range(140, 150):
 check(
     not any(240 <= code < 270 for code in REGISTRY),
     "240-269 is reserved for moodle usage and was ruled deliberately empty",
+)
+
+# The mail block. 150 and 151 are the two exit 3s, checked above; the other six
+# are operational and must stay that way. Promoting one of them to exit 3 would
+# send the operator to type a token at a problem a token cannot fix, and
+# demoting 150 or 151 would leave an agent looping on a credential only a human
+# can replace.
+for code in range(150, 158):
+    check(code in REGISTRY, f"mail code {code} is missing from the registry")
+for code in range(152, 158):
+    check(REGISTRY[code][1] == 1, f"mail code {code} is not exit 1")
+check(
+    not any(270 <= code < 290 for code in REGISTRY),
+    "270-289 is reserved for mail usage and was ruled deliberately empty",
 )
 
 # --- core exception names map to codes without importing the core -----------
@@ -119,6 +142,16 @@ for class_name, expected in [
     ("ActivityNotFound", 147),
     ("ActivityHasNoFile", 148),
     ("GradeReportUnavailable", 149),
+    ("MailNotConfigured", 150),
+    ("MailTokenRejected", 151),
+    ("MailUnreachable", 152),
+    ("MailProtocolError", 153),
+    # The other acronym-adjacent case: this must not come out as
+    # mail_box_not_found, which is in the registry under no code at all.
+    ("MailboxNotFound", 154),
+    ("MessageNotFound", 155),
+    ("MessageUnreadable", 156),
+    ("MessageHasNoAttachments", 157),
     ("ConfigUnwritable", 191),
     ("ValueError", 499),
     ("SomethingNobodyNamedYet", 499),
@@ -173,6 +206,50 @@ fails_with(["moodle", "deadlines", "--announcements", "-1"], 202)
 fails_with(["moodle", "deadlines", "--since", "yesterday"], 202)
 fails_with(["moodle", "fetch"], 201)
 fails_with(["moodle", "fetch", "not-an-id-or-a-url"], 202)
+
+# mail. A mailbox is a string for the same reason a course is: folder names are
+# the operator's own. A UID is not: it is a number or it is nothing.
+fails_with(["mail"], 200)
+fails_with(["mail", "nonsense"], 200)
+fails_with(["mail", "read"], 201)
+fails_with(["mail", "read", "not-a-uid"], 202)
+fails_with(["mail", "fetch"], 201)
+fails_with(["mail", "fetch", "not-a-uid"], 202)
+fails_with(["mail", "list", "--limit", "0"], 202)
+fails_with(["mail", "list", "--limit", "all"], 202)
+fails_with(["mail", "list", "--since", "yesterday"], 202)
+fails_with(["mail", "list", "--mailbox"], 201)
+# The one that matters most: there is no way to hand this tree a token on the
+# command line, so asking to is a usage error rather than a disclosure.
+fails_with(["mail", "login", "--token", "hunter2"], 202)
+fails_with(["mail", "login", "--password", "hunter2"], 202)
+
+# The defaults the help blocks state, held to the blocks rather than to the
+# core: a block that says "Default: INBOX" over a parser that says something
+# else is a lie this repo shipped.
+parsed = cli.build_parser().parse_args(["mail", "list"])
+check(
+    (parsed.mailbox, parsed.limit) == (cli.DEFAULT_MAILBOX, cli.DEFAULT_LIMIT),
+    f"mail list defaulted to {parsed.mailbox!r}/{parsed.limit}",
+)
+check(f"Default: {cli.DEFAULT_MAILBOX}." in cli.MAIL_LIST_HELP,
+      "the list help does not state the mailbox default the parser uses")
+check(f"Default: {cli.DEFAULT_LIMIT}." in cli.MAIL_LIST_HELP,
+      "the list help does not state the limit default the parser uses")
+for block in (cli.MAIL_READ_HELP, cli.MAIL_FETCH_HELP):
+    check(f"Default: {cli.DEFAULT_MAILBOX}." in block,
+          "a mail help block does not state the mailbox default")
+# `--from` is the operator's spelling and `from` is a Python keyword, so the
+# destination is renamed. A rename that got lost would silently drop the filter.
+parsed = cli.build_parser().parse_args(
+    ["mail", "list", "--from", "someone", "--search", "a phrase", "--unseen"]
+)
+check(
+    (parsed.sender, parsed.search, parsed.unseen) == ("someone", "a phrase", True),
+    "--from/--search/--unseen did not survive the parse",
+)
+parsed = cli.build_parser().parse_args(["mail", "read", "7", "--mailbox", "Sent"])
+check((parsed.uid, parsed.mailbox) == (7, "Sent"), "mail read did not parse its pair")
 
 # The values that must survive the parse rather than being rejected by it.
 parsed = cli.build_parser().parse_args(
@@ -232,6 +309,152 @@ try:
 finally:
     core.call = canonical_call
 
+# --- mail login: the prompt, and the promise that the token is never argv ----
+# The security property of this whole surface is one sentence: a token reaches
+# this CLI through a hidden prompt and through nothing else. It is checked from
+# both directions, because each half fails silently on its own. First that no
+# argument anywhere in the tree could carry a secret, walking the built parser
+# rather than trusting the list of flags written above. Then that the handler
+# really does read one with getpass, really does pass it to the core, and never
+# lets it out through stdout.
+
+def options(parser, path=()):
+    """Every option string and metavar in the tree, with where it was found."""
+    for action in parser._actions:
+        names = list(action.option_strings) or [str(action.dest)]
+        for name in names:
+            yield " ".join(path), name
+        if hasattr(action, "_name_parser_map"):
+            for name, child in action._name_parser_map.items():
+                yield from options(child, path + (name,))
+
+
+SECRETS = ("token", "password", "passwd", "secret", "credential", "auth")
+for where, name in options(cli.build_parser()):
+    lowered = name.lower().lstrip("-")
+    check(
+        not any(word in lowered for word in SECRETS),
+        f"`iitb {where}` takes an argument named {name!r}: a secret must never "
+        "be argv, where every process on the machine can read it and the "
+        "shell's history file keeps it",
+    )
+
+asked: list = []
+answer = {}
+reached = []
+noise = io.StringIO()  # the prompts and the warning, which belong on stderr
+canonical_call = core.call
+canonical_getpass = cli.getpass.getpass
+canonical_ask = cli.ask
+canonical_stderr = sys.stderr
+try:
+    sys.stderr = noise
+    def fake_call(module, function, **kwargs):
+        reached.append((module, function, kwargs))
+        if function == "configured":
+            return {"configured": False, "credentialPath": "/nowhere", "permissions": None}
+        return answer
+
+    def fake_getpass(prompt="", stream=None):
+        asked.append(("getpass", prompt, stream))
+        return "  s3cret-token\n"
+
+    core.call = fake_call
+    cli.getpass.getpass = fake_getpass
+    cli.ask = lambda prompt: asked.append(("visible", prompt, None)) or "someone"
+
+    answer = {"ldapId": "someone", "credentialPath": "/tmp/x", "mailboxCount": 6}
+    status, body = run("mail", "login")
+    check(status == 0, f"mail login: exit {status} != 0")
+    check(body.get("data") == answer, "mail login did not return the core's receipt")
+    check(
+        [(module, function) for module, function, _ in reached]
+        == [(cli.MAIL, "configured"), (cli.MAIL, "login")],
+        f"mail login called {[r[:2] for r in reached]}, not configured then login",
+    )
+    check(
+        reached[-1][2] == {"ldap_id": "someone", "token": "  s3cret-token\n"},
+        "mail login did not hand the core exactly what it collected",
+    )
+    # Not stripped, not normalised, not inspected here: what to do with
+    # surrounding whitespace on a pasted token is the core's call, and it makes
+    # it. A shell that trimmed it would be a second opinion about a secret.
+    check(
+        [kind for kind, _, _ in asked] == ["visible", "getpass"],
+        f"mail login prompted {[k for k, _, _ in asked]}, not visibly then hidden",
+    )
+    check(
+        asked[1][2] is noise,
+        "the hidden prompt does not fall back to stderr, so on a terminal-less "
+        "run it could echo into stdout",
+    )
+    check("s3cret-token" not in json.dumps(body), "the token reached stdout")
+
+    # An ldap id on the command line is a convenience and skips one prompt. The
+    # token prompt is not skippable, which is the point.
+    asked.clear()
+    reached.clear()
+    run("mail", "login", "someone")
+    check(
+        [kind for kind, _, _ in asked] == ["getpass"],
+        "an ldap id on the command line did not skip its own prompt, or skipped "
+        "the token prompt, which must never be skippable",
+    )
+
+    # Ctrl-C or a closed pipe at either prompt: nothing was collected, so
+    # nothing is sent and nothing is stored. 201, not a traceback and not 105.
+    for interruption in (EOFError(), KeyboardInterrupt()):
+        for at in ("visible", "getpass"):
+            reached.clear()
+            def refuse(*a, **k):
+                raise interruption
+
+            cli.ask = refuse if at == "visible" else (lambda prompt: "someone")
+            cli.getpass.getpass = refuse if at == "getpass" else fake_getpass
+            fails_with(["mail", "login"], 201)
+            check(
+                [f for _, f, _ in reached] == ["configured"],
+                f"a {type(interruption).__name__} at the {at} prompt still "
+                f"called {[f for _, f, _ in reached]}",
+            )
+finally:
+    core.call = canonical_call
+    cli.getpass.getpass = canonical_getpass
+    cli.ask = canonical_ask
+    sys.stderr = canonical_stderr
+
+# Whatever went to stderr along the way, the token is not in it. The warning
+# and the prompts are written by this repo, so this is a check on strings this
+# repo authors rather than on the core.
+check("s3cret-token" not in noise.getvalue(), "the token was echoed to stderr")
+check(
+    "never printed, logged, or returned" in noise.getvalue(),
+    "mail login did not warn the operator before asking for a token",
+)
+
+# `ask` prompts on stderr, never on stdout: one JSON object per invocation is
+# the contract, and a prompt printed into the middle of it breaks the parse.
+prompted = io.StringIO()
+canonical_stderr, canonical_stdin = sys.stderr, sys.stdin
+try:
+    sys.stderr = prompted
+    sys.stdin = io.StringIO("  someone \n")
+    out = io.StringIO()
+    with redirect_stdout(out):
+        got = cli.ask("IITB LDAP id: ")
+    check(got == "someone", f"ask returned {got!r}, not the stripped line")
+    check(out.getvalue() == "", "ask wrote its prompt to stdout")
+    check("IITB LDAP id: " in prompted.getvalue(), "ask did not prompt on stderr")
+
+    sys.stdin = io.StringIO("")
+    try:
+        cli.ask("x")
+        check(False, "ask on a closed stdin did not raise")
+    except EOFError:
+        pass
+finally:
+    sys.stderr, sys.stdin = canonical_stderr, canonical_stdin
+
 # The public message is where the operator is told what to run, so the command
 # name has to be in it: a 103 that does not name `iitb browser login` leaves an
 # agent to invent the remedy.
@@ -266,6 +489,12 @@ for argv, block in [
     (["moodle", "deadlines"], cli.MOODLE_DEADLINES_HELP),
     (["moodle", "grades"], cli.MOODLE_GRADES_HELP),
     (["moodle", "fetch"], cli.MOODLE_FETCH_HELP),
+    (["mail"], cli.MAIL_HELP),
+    (["mail", "login"], cli.MAIL_LOGIN_HELP),
+    (["mail", "mailboxes"], cli.MAIL_MAILBOXES_HELP),
+    (["mail", "list"], cli.MAIL_LIST_HELP),
+    (["mail", "read"], cli.MAIL_READ_HELP),
+    (["mail", "fetch"], cli.MAIL_FETCH_HELP),
     (["version"], cli.VERSION_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
@@ -286,7 +515,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 19, f"the tree has {len(tree)} leaves, expected 19")
+check(len(tree) == 24, f"the tree has {len(tree)} leaves, expected 24")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -297,11 +526,18 @@ for path in tree:
 sys.modules["iitb_core"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.placements"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.moodle"] = None  # type: ignore[assignment]
+sys.modules["iitb_core.mail"] = None  # type: ignore[assignment]
 fails_with(["placements", "applications"], 498)
 fails_with(["browser", "status"], 498)
 fails_with(["moodle", "courses"], 498)
+fails_with(["mail", "mailboxes"], 498)
+# An install problem is reported before a human is asked for anything: a
+# `mail login` that prompted for a token and then said "iitb-core is missing"
+# would have taken the operator's time for nothing, and taken a secret while
+# there was nothing to give it to.
+fails_with(["mail", "login"], 498)
 del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
-del sys.modules["iitb_core.moodle"]
+del sys.modules["iitb_core.moodle"], sys.modules["iitb_core.mail"]
 
 # --- the handshake: one integer, matched exactly, before any seam runs ------
 # The core here is a bare module carrying only API_VERSION, which is the
@@ -428,6 +664,31 @@ with tempfile.TemporaryDirectory() as home:
             check(
                 reached and reached[0][1] == {"target": "12", "out": "/tmp/x", "force": True},
                 f"fetch passed {reached and reached[0][1]} to the core",
+            )
+
+            # `mail fetch` shares the setting and the pre-flight. It is the one
+            # where finding out afterwards costs the most: the fetch thrown
+            # away has already pulled somebody's whole message down.
+            reached.clear()
+            (Path(home) / ".config" / "iitb" / "config.json").unlink()
+            fails_with(["mail", "fetch", "12"], 203)
+            check(not reached, "mail fetch reached the core with nowhere to write")
+
+            run("downloads", "set-default", str(Path(home) / "dl"))
+            reached.clear()
+            run("mail", "fetch", "12", "--mailbox", "Sent", "--out", "/tmp/x", "--force")
+            check(
+                reached and reached[0][1] == {
+                    "uid": 12, "mailbox": "Sent", "out": "/tmp/x", "force": True
+                },
+                f"mail fetch passed {reached and reached[0][1]} to the core",
+            )
+            reached.clear()
+            run("mail", "fetch", "12")
+            check(
+                reached and reached[0][1].get("out") is None,
+                "mail fetch invented an --out instead of leaving the default and "
+                "its per-portal subfolder to the core",
             )
         finally:
             core.call = canonical_call
@@ -577,6 +838,24 @@ for banned in ("import requests", "import httpx", "import urllib.request",
                "from bs4", "import lxml", "import selenium", "import cdp"):
     check(banned not in source, f"the shell must not {banned}")
 
+# No address of any institute machine, in any string this repo authors. The
+# guard is a shape rather than a list, which is what lets it live in a public
+# file: it names no host, so it publishes nothing, and it still catches the one
+# that gets pasted in from a core constant or a debugging session.
+import re as _re  # noqa: E402  a leak guard, not part of the CLI
+
+for pattern, what in [
+    (r"[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.ac\.in", "an institute hostname"),
+    (r"[a-z]+://", "a url"),
+    # The `host:port` shape, spelt without naming a port. A list of the ports
+    # to watch for would itself be a disclosure, and a bare number cannot be
+    # the test either: this registry is full of three-digit codes, several of
+    # which collide with well known ports.
+    (r"[A-Za-z0-9-]+\.[A-Za-z0-9-]+:\d+", "a host and port"),
+]:
+    found = _re.search(pattern, source)
+    check(found is None, f"the shell source contains {what}")
+
 # ---------------------------------------------------------------------------
 
 if failures:
@@ -586,5 +865,6 @@ if failures:
     sys.exit(1)
 print(
     "ok: envelope, exit codes, error mapping, the core handshake, parsing, "
-    "help, downloads, version, and one object on every exit path"
+    "help, downloads, version, no secret in argv, and one object on every "
+    "exit path"
 )

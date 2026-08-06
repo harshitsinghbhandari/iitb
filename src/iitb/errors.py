@@ -29,20 +29,32 @@ Block reservations::
 
     100-109  shared: session, browser, runtime, and the shell itself
     110-139  placements
-    140-169  moodle           (140-149 defined, 150-169 free)
+    140-149  moodle
+    150-169  mail             (150-157 defined, 158-169 free)
     170-189  browser
     190-199  shared: config and downloads
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
     240-269  moodle usage     (reserved; examined and deliberately empty)
+    270-289  mail usage       (reserved; examined and deliberately empty)
     497-499  core
 
-Moodle needs no usage code of its own. Every shape error it can produce is
-already 201, 202, 203 or 204, and its three candidates (an ambiguous course, a
-fetch target that is not a file, an activity type with no reader) are existence
-questions rather than shape ones, which are exit 1 by the standing rule: shape
-is usage, existence is operational. Recorded rather than left silent, so an
-implementer finding an empty reserved block knows it was examined.
+Moodle was reserved 140-169 and defined 140-149. Mail took 150-169 out of the
+tail of that reservation rather than opening a block further out, because a
+reservation is a promise about collisions and moodle has none to make in a
+range it did not use. Every moodle code that exists keeps its number, which is
+the only guarantee the table actually gives.
+
+Neither moodle nor mail needs a usage code of its own. Every shape error either
+can produce is already 201, 202, 203 or 204. Moodle's three candidates (an
+ambiguous course, a fetch target that is not a file, an activity type with no
+reader) and mail's three (an unknown folder, a UID that names no message, a
+message with nothing attached) are existence questions rather than shape ones,
+which are exit 1 by the standing rule: shape is usage, existence is
+operational. A cancelled `iitb mail login` is the one that looks like a new
+code and is not: nothing was given where something was required, which is 201.
+Recorded rather than left silent, so an implementer finding an empty reserved
+block knows it was examined.
 """
 
 from __future__ import annotations
@@ -67,12 +79,13 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "something the operator needs to do by hand; report it as described "
         "by `iitb placements --help`.",
     ),
-    # The one code in the whole registry that asks a human for anything, and it
-    # stays one code now that there is a command to point them at. A
-    # `iitb browser login` that ran and ended with no session is this, not a
-    # code of its own: the state it leaves behind is exactly the state this
-    # describes, and minting a second exit 3 would cost every consumer the
-    # single rule that exit 3 means go and get the operator.
+    # The exit 3 for everything that rides the browser, which is every surface
+    # but mail. A `iitb browser login` that ran and ended with no session is
+    # this, not a code of its own: the state it leaves behind is exactly the
+    # state this describes. Mail adds 150 and 151 rather than reusing this,
+    # because the remedy is a different command; the rule an agent branches on
+    # is unchanged, since it is the exit code that says "go and get the
+    # operator" and `error.name` that says which door to send them to.
     103: (
         "sso_session_ended",
         3,
@@ -244,6 +257,76 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         1,
         "Could not read your grades. If it keeps happening, report it as "
         "described by `iitb moodle --help`.",
+    ),
+    # --- 150 to 169: mail -----------------------------------------------
+    # The first surface with two exit 3 codes, and the only one that can have
+    # them. Everywhere else a dead sign-on is one condition with one remedy, so
+    # 103 covers it. Mail runs on a credential the operator issues by hand and
+    # that nothing here can renew, so "there is none yet" and "the one there
+    # stopped working" are two conditions, both of which only a human can end.
+    # They stay two codes because the sentence to read out differs (set it up,
+    # versus set it up again), and they are both exit 3 because the rule an
+    # agent runs on must not change: exit 3 means go and get the operator.
+    # Neither message may tell them to run `iitb browser login`, which would
+    # send them to the wrong place and leave mail exactly as broken.
+    150: (
+        "mail_not_configured",
+        3,
+        "No IITB mail credential is stored on this machine, and only the "
+        "operator can store one. Ask them to run `iitb mail login`, which "
+        "prompts them for their own access token, then run this command "
+        "again. Do not ask them for that token and do not offer to type it.",
+    ),
+    151: (
+        "mail_token_rejected",
+        3,
+        "The stored IITB mail credential was refused, which normally means "
+        "the operator's access token has expired. Only they can replace it: "
+        "ask them to run `iitb mail login` again with a fresh token, then run "
+        "this command again. Nothing this CLI can do will renew it, and "
+        "retrying will not help.",
+    ),
+    152: (
+        "mail_unreachable",
+        1,
+        "Could not reach the IITB mail server. Check the network and try "
+        "again.",
+    ),
+    153: (
+        "mail_protocol_error",
+        1,
+        "The IITB mail server answered something this version of iitb does "
+        "not understand. Report it as described by `iitb mail --help`.",
+    ),
+    154: (
+        "mailbox_not_found",
+        1,
+        "This account has no folder with that name. Run `iitb mail mailboxes` "
+        "to see the folders it does have; `detail` lists them too.",
+    ),
+    # Exit 1, not a usage code: the UID was a well formed number and simply
+    # names nothing. Shape is usage, existence is operational.
+    155: (
+        "message_not_found",
+        1,
+        "No message with that UID in that folder. UIDs are per folder, so a "
+        "UID from one folder is not found in another: check --mailbox. Run "
+        "`iitb mail list` again and use a UID from the fresh response.",
+    ),
+    156: (
+        "message_unreadable",
+        1,
+        "That message could not be read. Every other message in the folder is "
+        "unaffected. Report it as described by `iitb mail --help`.",
+    ),
+    # Mirrors 148: the argument was fine and the message simply has nothing on
+    # it, which is a fact about the mail rather than about the command line.
+    157: (
+        "message_has_no_attachments",
+        1,
+        "That message has nothing attached, so nothing was written. "
+        "`iitb mail list` reports \"hasAttachments\" for each message, and "
+        "`iitb mail read` lists what one carries.",
     ),
     # --- 170 to 189: browser --------------------------------------------
     # Deliberately not 103. A check that could not run is not a session that
