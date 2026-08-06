@@ -8,8 +8,8 @@ here and none ever will.
 The help text below is the product. The success test for this CLI is a
 fresh agent session with zero context learning the whole tree from `--help`
 alone, so the help blocks are written to be read by an agent that has never
-seen this repo, and they are reproduced here verbatim from the approved
-command-surface design.
+seen this repo, and each one is printed verbatim: argparse reformats nothing
+and adds nothing of its own.
 
 Everything that is printed on the way out:
 
