@@ -16,8 +16,10 @@ failure   {"ok": false, "error": {"code", "name",
 ```
 
 Exit codes: `0` success, `1` the operation failed, `2` you called the
-command wrong, `3` the operator's IITB single sign-on has ended and only
-they can restore it, `4` the core is missing or incompatible.
+command wrong, `3` only the operator can restore access and `error.name`
+says which door to send them to (`sso_session_ended` is
+`iitb browser login`; `mail_not_configured` and `mail_token_rejected` are
+`iitb mail login`), `4` the core is missing or incompatible.
 
 That holds on every exit path, not just the ones with a code. Anything
 unexpected comes back as error 105 `internal_error` at exit 1, with the
@@ -56,9 +58,10 @@ python3 tests/check.py
 
 No dependencies, no network, no browser. It covers what this repo owns: the
 envelope, the error-code registry, the exit-code mapping, argument parsing,
-and that every `--help` in the tree prints its block verbatim. Portal
-behaviour is verified live against the real thing, because that is the only
-place it can be verified honestly.
+that no command anywhere in the tree accepts a secret as an argument, and
+that every `--help` in the tree prints its block verbatim. Portal behaviour
+is verified live against the real thing, because that is the only place it
+can be verified honestly.
 
 ## Layout
 

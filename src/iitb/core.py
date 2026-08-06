@@ -42,6 +42,19 @@ The pinned core seams, one function per command::
     iitb_core.moodle.grades(course_token=...)
     iitb_core.moodle.fetch(target=..., out=..., force=...)
 
+    iitb_core.mail.configured()
+    iitb_core.mail.login(ldap_id=..., token=...)
+    iitb_core.mail.mailboxes()
+    iitb_core.mail.list(mailbox=..., unseen=..., sender=..., since=...,
+                        search=..., limit=...)
+    iitb_core.mail.read(uid=..., mailbox=...)
+    iitb_core.mail.fetch(uid=..., mailbox=..., out=..., force=...)
+
+`mail.login` is the one seam that is handed something the operator typed
+rather than something the command line carried, and the only one that takes a
+secret. It is passed through and not held: nothing in this repo stores, logs
+or inspects a token, and the receipt the seam returns is built without one.
+
 Each returns the `data` payload for its command. The shell wraps it in the
 envelope and prints it; it does not reshape it.
 """

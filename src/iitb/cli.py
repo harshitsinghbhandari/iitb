@@ -30,6 +30,7 @@ error on empty input rather than as a name it can read.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import re
 import sys
@@ -57,6 +58,8 @@ commands:
                eligibility for them, your applications, and the blog.
   moodle       Read Moodle: your enrolled courses, everything inside them,
                your grades, the files, and what is coming up.
+  mail         Read the operator's IITB email: folders, messages, and the
+               files attached to them.
   downloads    Configure where downloaded files are written.
   version      Report the installed iitb and iitb-core versions.
 
@@ -77,19 +80,25 @@ Exit codes:
   0  success
   1  the operation failed
   2  you called the command wrong
-  3  the operator's IITB single sign-on has ended and only they can restore
-     it, by running `iitb browser login` and signing in once
+  3  only the operator can restore access, and they do it by signing in
+     once; "error.name" says which door to send them to
   4  iitb-core is missing or incompatible; this is an install problem
 
 Branch on the exit code first and "error.name" second. "error.name" is a
 stable slug, so it stays true across renumbering; "error.code" is the
 3-digit number for the same thing.
 
+There are two doors, and sending the operator to the wrong one wastes
+their time and fixes nothing:
+  sso_session_ended                        `iitb browser login`
+  mail_not_configured, mail_token_rejected `iitb mail login`
+
 Where to start:
   iitb browser sso-status    is the operator signed in?
   iitb browser login         open a window so they sign in once
   iitb placements --help     the placements command tree
   iitb moodle --help         the moodle command tree
+  iitb mail --help           the mail command tree
   iitb downloads --help      set the default download directory once
   iitb version               which versions are installed
 
@@ -97,15 +106,18 @@ Portal commands start the browser themselves and restore an expired
 session themselves. The browser is headless, so nothing appears on the
 operator's screen. You do not need to run anything first, and you should
 never ask the operator to sign in, open a page, or click anything to make
-a command work unless a command exits 3. On an exit 3, the one thing to
-ask them for is `iitb browser login`.
+a command work unless a command exits 3.
+
+`iitb mail` is the exception to all of that: it uses no browser, it shares
+nothing with the other three, it has its own credential, and nothing can
+renew that credential except the operator running `iitb mail login`.
 
 Nothing is cached. Every invocation fetches live, so re-run a command
 instead of reusing an earlier answer.
 
 This CLI only reads. It never applies to a job, withdraws an application,
 uploads anything, posts a comment, starts a quiz attempt, submits an
-assignment, or marks anything done.
+assignment, marks anything done, or sends, deletes or files an email.
 
 Reporting a failure: email dev@theharshitsingh.com. Do not open a GitHub
 issue and do not paste the output into one. A useful report contains portal
@@ -640,6 +652,271 @@ cannot get the real file it fails and writes nothing at all, not even a
 partial file.
 """
 
+MAIL_HELP = """
+usage: iitb mail <command> [options]
+
+Read the operator's IIT Bombay email: which folders exist, what is in one of
+them, one message in full, and the files attached to it.
+
+commands:
+  login       Store the operator's mail credential. Interactive, and the one
+              command in this CLI that is.
+  mailboxes   List the folders on the account, with message and unread counts.
+  list        List messages in a folder, newest first, headers only.
+  read        Show one message in full, without marking it read.
+  fetch       Save the files attached to one message to disk.
+
+Every command prints exactly one JSON object on stdout and nothing else.
+  success:  {"ok": true, "data": ...}
+  failure:  {"ok": false, "error": {"code": <3 digits>, "name": ..., "message": ...}}
+
+Exit codes:
+  0  success
+  1  the operation failed
+  2  you called the command wrong
+  3  only the operator can restore access to their mail, by running
+     `iitb mail login` and typing their own access token once
+  4  iitb-core is missing or incompatible; this is an install problem
+
+This tree uses no browser and shares nothing with the other portals. Its
+credential is its own: the operator stores it once with `iitb mail login`, and
+nothing here can renew it. So exit 3 on this surface is never
+`iitb browser login`, and running that would fix nothing. The two names to
+read are `mail_not_configured`, meaning there is no credential yet, and
+`mail_token_rejected`, meaning the one there has stopped working. Both mean
+the same thing to you: ask the operator, and wait.
+
+Naming a message: a message is a UID together with the folder it is in. UIDs
+are unique inside one folder and mean nothing outside it, so `read` and
+`fetch` take `--mailbox` alongside the UID, and a UID from
+`iitb mail list --mailbox Sent` will not be found in INBOX. Nothing is cached
+and mail keeps arriving, so re-run `iitb mail list` rather than reusing an
+earlier answer.
+
+This CLI only reads mail. It never sends, replies to, forwards, deletes,
+moves or files a message, never marks one read or unread, and never changes a
+setting on the account. Reading a message leaves it exactly as unread as it
+was, and there is no flag that changes that. Sending in particular is not
+half-built or one flag away: there is no code here that could send anything.
+
+Mail is other people's personal data: their names, their addresses, what they
+wrote, and the files they attached. Do not write a subject, an address, a
+body or an attachment name into a repository, an issue, a pull request, or
+any shared log. Report what the operator asked about and nothing more.
+
+Reporting a failure: email dev@theharshitsingh.com. Do not open a GitHub
+issue and do not paste the output into one. A useful report contains somebody
+else's mail, and a GitHub issue is public and permanent.
+"""
+
+MAIL_LOGIN_HELP = """
+usage: iitb mail login [<ldap-id>]
+
+Store the operator's mail credential, after checking that it works.
+
+This is the one command in this CLI that talks to a human, and the only one
+that ever prompts. It asks for two things, on the operator's own terminal:
+
+  IITB LDAP id            visible as they type it
+  IITB SSO access token   hidden; not echoed, not printed, not logged
+
+positional arguments:
+  ldap-id
+      The operator's IITB LDAP id, so that the token is the only thing they
+      have to type. Optional; without it, this prompts for that as well.
+
+The token is never a command-line argument, and there is no flag for it. That
+is deliberate and it is not an omission to be fixed: an argument is visible to
+every other process on the machine while the command runs, and it is written
+into the shell's history file, where it stays. It is read from the hidden
+prompt, or from stdin when stdin is a pipe, and from nowhere else.
+
+An agent must never run this command. Ask the operator to run it themselves,
+in their own terminal. Never ask them for the token, never offer to type it
+for them, and never accept it in a chat message: a token that has been pasted
+into a transcript has been disclosed, and a disclosed token cannot be
+undisclosed.
+
+The credential is checked against the live server before anything is stored,
+so a token that does not work is never saved and a failed attempt cannot
+damage a credential that was already working. It is stored under
+~/.config/iitb/, readable only by the operator, and it is never printed: the
+receipt names the file and reports that the check passed, and carries no
+token.
+
+  stored      exit 0, {"ok": true, "data": {"ldapId", "credentialPath", ...}}
+  refused     exit 3, error 151. Nothing was stored, and any credential that
+              was already there is untouched. The token is wrong or has
+              expired; get a fresh one and run this again.
+  cancelled   exit 2, error 201. Nothing was stored.
+
+Run this when a command exits 3 with `mail_not_configured` or
+`mail_token_rejected`. Nothing else in this CLI can restore mail access, and
+no other command will ever prompt for anything.
+"""
+
+MAIL_MAILBOXES_HELP = """
+usage: iitb mail mailboxes
+
+List every folder on the account, with what is in each one.
+
+Takes no options. The list is complete and unpaginated.
+
+Each folder carries:
+  name         the folder's name, exactly as the account holds it, and the
+               spelling `--mailbox` expects elsewhere
+  messages     how many messages it holds, or null if it could not be asked
+  unseen       how many of those are unread, or null for the same reason
+  selectable   false for a folder that only contains other folders and so
+               cannot be listed or read
+
+Start here. Folder names are the operator's own and this CLI invents no
+aliases for them, so every `--mailbox` elsewhere takes a name out of this
+list. The counts are what make this worth running before `iitb mail list`:
+they answer "where is the unread mail" in one call.
+"""
+
+MAIL_LIST_HELP = """
+usage: iitb mail list [--mailbox NAME] [--unseen] [--from TEXT]
+                      [--since DATE] [--search TEXT] [--limit N]
+
+List messages in one folder, newest first. Headers only: no body is fetched,
+and nothing is marked read.
+
+options:
+  --mailbox NAME
+      Which folder to list. Default: INBOX. Names come from
+      `iitb mail mailboxes`.
+  --unseen
+      Only messages that are still unread.
+  --from TEXT
+      Only messages whose From header contains TEXT.
+  --since DATE
+      Only messages received on or after DATE (YYYY-MM-DD).
+  --search TEXT
+      Only messages containing TEXT anywhere, including in the body.
+  --limit N
+      How many messages to return, counting back from the newest.
+      Default: 50.
+
+Filters compose: every one you give has to hold.
+
+--from and --search are slow, and it is the server that is slow rather than
+this CLI. Neither is indexed, so answering one means reading every message in
+the folder, and on a folder holding five figures of messages that is tens of
+seconds for a single call. --unseen and --since are indexed and come back
+immediately. A command that has been running for half a minute with --from or
+--search is working, not hung: do not kill it, do not retry it in a loop, and
+tell the operator it is going to take a moment rather than letting them watch
+a silent terminal.
+
+Newest first means newest by arrival, which is the order the account itself
+keeps. It is not the order of the Date header: that header is written by the
+sender's own machine, so a wrong clock there would otherwise push a message to
+the top of the list or off the end of --limit. Each message reports its date
+both ways, parsed into "date" (UTC) and "dateLocal" (IST) and verbatim into
+"dateText". A date that could not be parsed is null beside the text it came
+from, never a guess.
+
+"counts" gives two numbers: "matched" is how many messages the filters found,
+"returned" is how many came back after --limit. When they differ, say so
+rather than reporting the tail as the whole.
+
+Each message carries "uid" and "mailbox" together, because that pair is what
+`iitb mail read` and `iitb mail fetch` take. "hasAttachments" is true when the
+message carries any part that is not body text, which is the same rule those
+two use, so the three commands never disagree about what is attached.
+
+Subjects, addresses and names here belong to the people who wrote them. Do not
+write them into a repository, an issue, a pull request, or any shared log.
+"""
+
+MAIL_READ_HELP = """
+usage: iitb mail read <uid> [--mailbox NAME]
+
+Show one message in full: every header, the body, and what is attached to it.
+
+positional arguments:
+  uid
+      The message's UID, as returned in "uid" by `iitb mail list`. A UID is
+      unique inside one folder and means nothing outside it, so pass
+      --mailbox the folder you took it from.
+
+options:
+  --mailbox NAME
+      The folder that UID belongs to. Default: INBOX.
+
+Reading a message does not mark it read. Its unread state after this command
+is exactly what it was before, and there is no flag to change that, because
+this CLI does not alter the account. An agent may skim an inbox on the
+operator's behalf without leaving a trace of having done it.
+
+"body" carries both forms of the message. "text" is the plain-text part, and
+it is what to reason over. "html" is the formatted part, kept because about
+one message in ten has no plain-text part at all, and because a table in an
+announcement does not survive being flattened. "body.format" says which of the
+two are present, so you never have to guess why one of them is null.
+
+"headers" is every header on the message, in order, duplicates kept, rather
+than the subset this CLI guessed you would want.
+
+"attachments" lists what is attached, each with a filename, a content type and
+a byte count, but not the bytes; `iitb mail fetch` is what writes them to
+disk. An attachment is any part that is not body text, so a forwarded message
+and an inline image are both listed, and the count here is exactly what
+`iitb mail fetch` would write.
+
+The whole of this response is somebody's personal data. Do not write a
+subject, an address, a body or an attachment name into a repository, an issue,
+a pull request, or any shared log. Tell the operator what it says and stop
+there.
+"""
+
+MAIL_FETCH_HELP = """
+usage: iitb mail fetch <uid> [--mailbox NAME] [--out PATH] [--force]
+
+Save the files attached to one message to disk.
+
+positional arguments:
+  uid
+      The message's UID, as returned in "uid" by `iitb mail list` or
+      `iitb mail read`. Pass --mailbox the folder you took it from.
+
+options:
+  --mailbox NAME
+      The folder that UID belongs to. Default: INBOX.
+  --out PATH
+      An existing directory to write into. PATH is a directory rather than a
+      filename, because one message can carry any number of attachments and
+      the names are the senders'.
+      Without --out, the files go to the "mail" folder inside your default
+      download directory, which is set once with
+      `iitb downloads set-default`. Until that is set, --out is required.
+  --force
+      Overwrite files that already exist. Without it, an existing file is an
+      error and nothing at all is written.
+
+Every attachment on the message is written; there is no way to ask for one of
+them. A message with nothing attached is error 157 rather than an empty
+success, so read "hasAttachments" on the listing first if you are not sure.
+
+Files are written under the names their senders gave them, each reduced to a
+bare filename, so a name can never write outside the directory you chose. A
+part that arrived with no name of its own is given one that says what it is,
+and that is the only name this CLI invents anywhere. Two attachments sharing
+one name both survive: the second gets a numbered suffix rather than
+overwriting the first.
+
+Each written file is reported with its absolute path, its byte count, its
+content type and a sha256, so a repeated download can be recognised without
+reading the file back off disk.
+
+Fetching attachments does not mark the message read either.
+
+An attachment is a file a stranger sent. Write it where the operator asked and
+nowhere else, never into a repository, and treat what is inside it as theirs.
+"""
+
 VERSION_HELP = """
 usage: iitb version
 
@@ -788,6 +1065,15 @@ INCLUDE_CHOICES = ("file", "page", "link", "assignment", "forum", "folder", "qui
 # and this repo owns every string in that block.
 DEFAULT_ANNOUNCEMENTS = 5
 
+# The same rule for mail's two defaults. The core has both, and reading them
+# from it would mean the help block could go stale against the value it states
+# without anything failing. Held here, they are one string and one number that
+# a check can hold to the block, and a core that disagrees is a seam change
+# rather than a silent drift. "INBOX" is not portal knowledge: it is the one
+# mailbox name the protocol itself reserves.
+DEFAULT_MAILBOX = "INBOX"
+DEFAULT_LIMIT = 50
+
 # ----------------------------------------------------------------------
 # Argument types. Every value the shell can reject itself, it rejects here,
 # so a usage error never costs a network round trip.
@@ -880,6 +1166,7 @@ def iso_date(raw: str) -> str:
 BROWSER = "iitb_core.browser"
 PLACEMENTS = "iitb_core.placements"
 MOODLE = "iitb_core.moodle"
+MAIL = "iitb_core.mail"
 
 
 def browser_start(args) -> dict:
@@ -1067,6 +1354,110 @@ def moodle_fetch(args) -> object:
 
 
 # ----------------------------------------------------------------------
+# Mail. The one surface with no browser under it, and the one command in
+# the whole CLI that reads from a human instead of from argv.
+# ----------------------------------------------------------------------
+
+
+def ask(prompt: str) -> str:
+    """One visible line from the operator, prompted on stderr.
+
+    `input()` would be shorter and is wrong here: it writes its prompt to
+    stdout, and stdout carries exactly one JSON object per invocation. A
+    prompt printed there is a prompt that lands in the middle of the thing
+    the caller is parsing.
+    """
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.strip()
+
+
+def mail_login(args) -> dict:
+    """Collect two values from the operator and hand them straight to the core.
+
+    **The token is read here and only here, from a hidden prompt.** There is no
+    flag for it, there is no positional for it, and adding one would not be a
+    convenience: an argument is readable by every other process on the machine
+    for as long as the command runs, and the shell writes it into a history
+    file that outlives the session. The LDAP id is a positional because it is
+    not a secret and typing it every time is friction for nothing.
+
+    Neither value is stored, logged, or looked at here. This asks, passes them
+    on, and returns the core's receipt, which is built without the token in it.
+    The verification against the live server happens on the core's side of the
+    seam, before anything is written, so a rejected token never reaches disk.
+    """
+    # Asked before the prompt, not after, so an operator about to replace a
+    # working credential is told so while they can still stop. No network.
+    state = core.call(MAIL, "configured")
+    sys.stderr.write(
+        "iitb mail login: the token is hidden as you type, and is never "
+        "printed, logged, or returned.\nDo not paste it into a chat window, "
+        "an agent session, or a log.\n"
+    )
+    if state.get("configured"):
+        sys.stderr.write(
+            f"This replaces the credential already stored at "
+            f"{state.get('credentialPath')}.\n"
+        )
+
+    try:
+        ldap_id = args.ldap_id or ask("IITB LDAP id: ")
+        token = getpass.getpass(
+            "IITB SSO access token (hidden): ", stream=sys.stderr
+        )
+    except (EOFError, KeyboardInterrupt):
+        raise CliError(
+            201, detail="the login was cancelled; nothing was stored"
+        ) from None
+
+    return core.call(MAIL, "login", ldap_id=ldap_id, token=token)
+
+
+def mail_mailboxes(args) -> object:
+    return core.call(MAIL, "mailboxes")
+
+
+def mail_list(args) -> object:
+    return core.call(
+        MAIL,
+        "list",
+        mailbox=args.mailbox,
+        unseen=args.unseen,
+        sender=args.sender,
+        since=args.since,
+        search=args.search,
+        limit=args.limit,
+    )
+
+
+def mail_read(args) -> object:
+    return core.call(MAIL, "read", uid=args.uid, mailbox=args.mailbox)
+
+
+def mail_fetch(args) -> object:
+    """The same pre-flight `moodle fetch` makes, for the same reason.
+
+    Nowhere to write is knowable before the network, and mail is the surface
+    where finding it out afterwards costs the most: the fetch that would have
+    to be thrown away has already pulled somebody's whole message down.
+    """
+    if args.out is None and config.download_dir() is None:
+        raise CliError(203)
+    return core.call(
+        MAIL,
+        "fetch",
+        uid=args.uid,
+        mailbox=args.mailbox,
+        out=args.out,
+        force=args.force,
+    )
+
+
+# ----------------------------------------------------------------------
 # Versions. The one command that answers about the install rather than a
 # portal, and so the one that does not go through the core seam.
 # ----------------------------------------------------------------------
@@ -1222,6 +1613,7 @@ def build_parser() -> Parser:
     _build_browser(top)
     _build_placements(top)
     _build_moodle(top)
+    _build_mail(top)
     _build_downloads(top)
     make(top, "version", VERSION_HELP, report_version)
     return root
@@ -1326,6 +1718,51 @@ def _build_moodle(top) -> None:
 
     fetch = make(sub, "fetch", MOODLE_FETCH_HELP, moodle_fetch)
     hidden(fetch, "target", metavar="<target>", type=fetch_target)
+    hidden(fetch, "--out", metavar="PATH", default=None)
+    hidden(fetch, "--force", action="store_true")
+
+
+def _build_mail(top) -> None:
+    """Five leaves, one of which prompts, and no argument anywhere is a secret.
+
+    The property to keep while editing this function: **nothing in this tree
+    accepts a token**. Not as a flag, not as a positional, not as an
+    environment variable read here. `login` is the only command that handles
+    one at all, and it reads it from a hidden prompt inside its handler. The
+    check asserts it, because the reason is invisible in the diff that would
+    break it: a `--token` flag looks like a convenience and is a disclosure,
+    since arguments are world-readable in the process table and are written to
+    the shell's history file.
+
+    A mailbox is a plain string, like a moodle course: folder names are the
+    operator's own and the only vocabulary that could reject one lives on the
+    account, not here.
+    """
+    mail = make(top, "mail", MAIL_HELP)
+    sub = commands(mail, "subcommand")
+
+    login = make(sub, "login", MAIL_LOGIN_HELP, mail_login)
+    hidden(login, "ldap_id", metavar="<ldap-id>", nargs="?", default=None)
+
+    make(sub, "mailboxes", MAIL_MAILBOXES_HELP, mail_mailboxes)
+
+    listing = make(sub, "list", MAIL_LIST_HELP, mail_list)
+    hidden(listing, "--mailbox", metavar="NAME", default=DEFAULT_MAILBOX)
+    hidden(listing, "--unseen", action="store_true")
+    # `--from` is the operator's word for it and `from` is a Python keyword, so
+    # the destination is named rather than derived.
+    hidden(listing, "--from", metavar="TEXT", dest="sender", default=None)
+    hidden(listing, "--since", metavar="DATE", type=iso_date, default=None)
+    hidden(listing, "--search", metavar="TEXT", default=None)
+    hidden(listing, "--limit", metavar="N", type=positive_int, default=DEFAULT_LIMIT)
+
+    read = make(sub, "read", MAIL_READ_HELP, mail_read)
+    hidden(read, "uid", metavar="<uid>", type=numeric_id)
+    hidden(read, "--mailbox", metavar="NAME", default=DEFAULT_MAILBOX)
+
+    fetch = make(sub, "fetch", MAIL_FETCH_HELP, mail_fetch)
+    hidden(fetch, "uid", metavar="<uid>", type=numeric_id)
+    hidden(fetch, "--mailbox", metavar="NAME", default=DEFAULT_MAILBOX)
     hidden(fetch, "--out", metavar="PATH", default=None)
     hidden(fetch, "--force", action="store_true")
 
