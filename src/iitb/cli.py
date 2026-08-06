@@ -134,6 +134,12 @@ The CLI drives its own Chrome with its own profile, kept apart from the
 operator's everyday browser. It runs headless, so nothing appears on the
 operator's screen while a command works.
 
+Google Chrome has to be installed for any of this, and it is the only
+thing this CLI needs that it cannot install for itself. If it is missing,
+every browser-backed command fails with error 171 and says so: install
+Chrome from google.com/chrome, or point IITB_CHROME_BIN at an existing
+Chrome binary if it lives somewhere unusual.
+
 `iitb browser login` is the one exception, and the one thing the operator
 ever has to do: it opens a visible window, they sign in to IITB SSO once by
 hand, and every later command rides that session with no window at all.
@@ -190,7 +196,8 @@ reuses it rather than starting a second one, and "launched" comes back
 false. The profile is persistent, so a sign-in survives a stop and a later
 start.
 
-Fails with error 104 if Chrome cannot be started or reached.
+Fails with error 104 if Chrome cannot be started or reached, and with
+error 171 if there is no Google Chrome installed to start.
 """
 
 BROWSER_ATTACH_HELP = """

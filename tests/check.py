@@ -90,6 +90,25 @@ for code in (150, 151):
         f"{code} sends the operator to the browser, which cannot fix mail",
     )
 check(REGISTRY[104][1] == 1, "104 browser_unavailable must be exit 1, not exit 3")
+
+# 104 and 171 are two conditions with two remedies, and folding them back into
+# one would cost a new operator the only sentence that unblocks them. 171 has
+# to keep saying how to install Chrome; 104 has to keep not saying it, because
+# a Chrome that will not start is not a Chrome that is missing.
+check(REGISTRY[171][0] == "chrome_not_found", "171 is not chrome_not_found")
+check(REGISTRY[171][1] == 1, "171 chrome_not_found must be exit 1, not exit 3")
+check(
+    "google.com/chrome" in REGISTRY[171][2],
+    "171 does not tell the operator where to get Chrome",
+)
+check(
+    "IITB_CHROME_BIN" in REGISTRY[171][2],
+    "171 does not name the override for a Chrome installed elsewhere",
+)
+check(
+    "install" not in REGISTRY[104][2].lower(),
+    "104 tells the operator to install Chrome, which is 171's job",
+)
 check(REGISTRY[497][1] == 4, "497 core_incompatible must be exit 4")
 check(REGISTRY[498][1] == 4, "498 core_missing must be exit 4")
 check(REGISTRY[499][1] == 1, "499 core_failed must be exit 1")
@@ -125,6 +144,10 @@ check(
 for class_name, expected in [
     ("BrowserUnavailable", 104),
     ("SSOCheckFailed", 170),
+    # A subclass of BrowserUnavailable in the core, and still its own code
+    # here: the shell reads the class name, so the narrower answer survives
+    # the hierarchy.
+    ("ChromeNotFound", 171),
     ("SSOSessionEnded", 103),
     ("PortalUnreachable", 110),
     ("PortalResponseUnexpected", 112),
@@ -465,6 +488,12 @@ check(
 check(
     "iitb browser login" in cli.ROOT_HELP,
     "the root help does not name `iitb browser login`",
+)
+# The one prerequisite this CLI cannot install for itself, so the browser help
+# has to say it before the operator hits it as an error.
+check(
+    "google.com/chrome" in cli.BROWSER_HELP,
+    "the browser help does not say where to get Google Chrome",
 )
 
 # --- --help is text on stdout at exit 0, and it is the verbatim block -------
