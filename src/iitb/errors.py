@@ -31,7 +31,7 @@ Block reservations::
     110-139  placements
     140-149  moodle
     150-169  mail             (150-157 defined, 158-169 free)
-    170-189  browser
+    170-189  browser          (170-171 defined, 172-189 free)
     190-199  shared: config and downloads
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
@@ -338,6 +338,34 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "Could not check the operator's IITB single sign-on, so its state is "
         "unknown. This is not the same as an ended session: do not ask the "
         "operator to sign in on this error. Try again.",
+    ),
+    # Not 104, and the distinction is the whole reason this code exists. 104
+    # means there is a Chrome and it would not start, which is a bug to
+    # report; this means the machine has no Chrome at all, which is a five
+    # minute download and the only thing standing between a new operator and
+    # a working CLI. Told as 104 it reads "report it", which is the one
+    # instruction that leaves them exactly as stuck.
+    #
+    # Exit 1, not exit 3, even though a human does have to act. Exit 3 keeps
+    # its single meaning across this CLI, which is that the operator's own
+    # sign-on needs them; a missing application is not that, and the remedy
+    # rides in the message where an agent reads it out either way.
+    #
+    # `google.com/chrome` with no scheme in front of it, on purpose. The leak
+    # guard in the checks bans every scheme-and-slashes prefix in this repo's
+    # source by shape rather than by a list of hosts, which is the only form
+    # of that guard that can live in a public file. This message is not what
+    # it is aimed at, and the guard is worth more than four characters: do not
+    # "fix" this into a full URL. (This comment cannot spell one either.)
+    171: (
+        "chrome_not_found",
+        1,
+        "Google Chrome is not installed on this machine, or iitb could not "
+        "find it. This CLI drives its own Chrome, so it needs one: install "
+        "Google Chrome from google.com/chrome and run the command again. "
+        "If Chrome is already installed somewhere unusual, "
+        "set IITB_CHROME_BIN to the full path of its binary instead. "
+        "`detail` says where iitb looked.",
     ),
     # --- 190 to 199: config and downloads -------------------------------
     190: (
