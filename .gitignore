@@ -30,5 +30,13 @@ htmlcov/
 *.env
 !*.env.example
 
+# Logs. The internal-error log this CLI writes holds tracebacks that can be
+# carrying portal data, so a copy of one must never reach a repo.
+*.log
+
+# Editors
+.idea/
+.vscode/
+
 # macOS
 .DS_Store

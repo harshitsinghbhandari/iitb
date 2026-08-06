@@ -1,12 +1,23 @@
 # iitb
 
-A CLI for IITB portals, built agent-first.
+An agent-first command line over the IIT Bombay portals: placements, Moodle,
+and mail. Everything prints one JSON object on stdout and nothing else, so an
+agent never has to parse prose.
 
-This repo is the command surface: the command tree, help text, and output
-conventions. The implementation lives in a private core package.
+**It only reads.** No command in this CLI changes anything on an IITB server.
+It never applies to a job or withdraws an application, never starts a quiz
+attempt, submits an assignment, posts in a forum or marks anything done, and
+never sends, deletes, moves or files an email. Reading a message does not even
+mark it read. That is a property of the whole surface rather than a default:
+there is no flag anywhere that turns writing on.
 
-Everything prints one JSON object on stdout and nothing else, so an agent
-never has to parse prose:
+**This repo is the command surface only.** It holds the command tree, the help
+text, the output envelope and the error-code registry. The implementation,
+`iitb-core`, is private and is not published anywhere, so this repo is not
+runnable on its own. What is here is the shape of the CLI, which is the part
+worth reading and the part worth copying.
+
+## The envelope
 
 ```
 success   {"ok": true, "data": ...}                     exit 0
@@ -31,24 +42,52 @@ non-zero exit.
 are the two numbers a bug report needs. `iitb --version` answers the same
 object and points back at the command.
 
-## Install
-
-The shell depends on `iitb-core`, which is not published. Clone both repos
-side by side and install the shell with the core alongside it:
+## The tree
 
 ```
-uv tool install --editable ./iitb --with-editable ./iitb-core
+iitb browser     start, attach, status, sso-status, stop, login
+iitb placements  jobs, job, deadlines, applications, blog posts, blog post
+iitb moodle      courses, course, deadlines, grades, fetch
+iitb mail        login, mailboxes, list, read, fetch
+iitb downloads   set-default
+iitb version
 ```
 
-That puts `iitb` on your PATH. Then:
+Some tasks it is built to answer:
 
 ```
-iitb --help
+iitb placements deadlines --within 48h --eligible
+iitb placements jobs --status open --company acme
+iitb moodle deadlines --announcements 10
+iitb moodle course "XX 101" --no-content
+iitb mail list --unseen --since 2026-08-01
 ```
 
 `--help` is the documentation. The whole tree is discoverable from it, which
 is the property this CLI is built around: a fresh agent session with no
 context should be able to work the portals from `iitb --help` alone.
+
+```
+iitb --help
+```
+
+## Running it
+
+The shell is argparse plus one import of `iitb-core`, and `iitb-core` is
+private: it is not on PyPI, not on any public index, and not distributed. So
+`pip install iitb` will not give you a working CLI, and nothing here pretends
+otherwise. The dependency is declared because it is real, not because it
+resolves.
+
+With the core present, the shell installs against it:
+
+```
+uv tool install --editable ./iitb --with-editable <path to the core>
+```
+
+Without the core, every portal command answers error 498 `core_missing` at
+exit 4, which is the honest result rather than a crash. `--help` and the
+argument parsing work regardless, and so does the check below.
 
 ## Check
 
@@ -56,12 +95,13 @@ context should be able to work the portals from `iitb --help` alone.
 python3 tests/check.py
 ```
 
-No dependencies, no network, no browser. It covers what this repo owns: the
-envelope, the error-code registry, the exit-code mapping, argument parsing,
-that no command anywhere in the tree accepts a secret as an argument, and
-that every `--help` in the tree prints its block verbatim. Portal behaviour
-is verified live against the real thing, because that is the only place it
-can be verified honestly.
+No dependencies, no network, no browser, and no core needed. It covers what
+this repo owns: the envelope, the error-code registry, the exit-code mapping,
+argument parsing, that no command anywhere in the tree accepts a secret as an
+argument, that no institute hostname or url is in the source, and that every
+`--help` in the tree prints its block verbatim. Portal behaviour is verified
+live against the real thing, because that is the only place it can be verified
+honestly.
 
 ## Layout
 
@@ -72,12 +112,16 @@ src/iitb/core.py     the one seam into the private core
 src/iitb/config.py   settings under ~/.config/iitb/
 ```
 
-No portal knowledge lives in this repo, and none ever will. The shell is
-argparse plus one import; it does not know what the core does, only how to
-ask it and how to report what came back.
+No portal knowledge lives in this repo, and none ever will. No hostname, no
+endpoint, no selector, no session mechanic. The shell does not know what the
+core does, only how to ask it and how to report what came back.
 
 ## Reporting a failure
 
 Email dev@theharshitsingh.com. Do not open a GitHub issue and do not paste
 command output into one: a useful report contains portal data, and an issue
 is public and permanent.
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).

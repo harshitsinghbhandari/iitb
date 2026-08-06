@@ -1,18 +1,42 @@
 [project]
 name = "iitb"
 version = "0.1.0"
-description = "A command-line surface for IIT Bombay portals, built agent-first"
+description = "An agent-first command-line surface for IIT Bombay portals"
 readme = "README.md"
 requires-python = ">=3.10"
-# The shell is argparse plus one import. A third-party dependency here would
-# describe what the core does even if no string did, so there are none.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Harshit Singh Bhandari", email = "dev@theharshitsingh.com" },
+]
+keywords = ["cli", "agent", "json"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Utilities",
+]
+# `iitb-core` is the private implementation. It is not on PyPI and not on any
+# public index, so this requirement does not resolve from one: it is declared
+# because the dependency is real, and an install without it answers 498
+# core_missing at exit 4 rather than crashing. The shell itself is argparse
+# plus that one import; a third-party dependency here would describe what the
+# core does even if no string did, so there are none.
 dependencies = ["iitb-core"]
+
+# No Issues url on purpose: a useful bug report on this CLI carries portal
+# data, so the README sends it to an address rather than to a public tracker.
+[project.urls]
+Repository = "https://github.com/harshitsinghbhandari/iitb"
 
 [project.scripts]
 iitb = "iitb.cli:run"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -844,8 +844,24 @@ for banned in ("import requests", "import httpx", "import urllib.request",
 # that gets pasted in from a core constant or a debugging session.
 import re as _re  # noqa: E402  a leak guard, not part of the CLI
 
+# The institute's domain is checked over everything this repo publishes, not
+# only over `src`: the README and this file go out too, and a host is at least
+# as likely to be pasted into an example as into a constant. The suffix alone
+# is the whole test, so a bare domain and an address at it are caught the same
+# way a subdomain is, and the pattern still names nothing. The url and
+# host:port shapes stay on `src`, where a url of any kind is wrong; the README
+# legitimately carries one.
+repo = Path(__file__).resolve().parent.parent
+published = source + "\n".join(
+    (repo / name).read_text(encoding="utf-8")
+    for name in ("README.md", "pyproject.toml", "tests/check.py")
+)
+check(
+    _re.search(r"\.ac\.in", published) is None,
+    "this repo names the institute's own domain",
+)
+
 for pattern, what in [
-    (r"[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.ac\.in", "an institute hostname"),
     (r"[a-z]+://", "a url"),
     # The `host:port` shape, spelt without naming a port. A list of the ports
     # to watch for would itself be a disclosure, and a bare number cannot be
