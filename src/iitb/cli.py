@@ -797,11 +797,13 @@ options:
   --unseen
       Only messages that are still unread.
   --from TEXT
-      Only messages whose From header contains TEXT.
+      Only messages whose From header contains TEXT. Best-effort: an
+      empty result is not proof of absence. See below.
   --since DATE
       Only messages received on or after DATE (YYYY-MM-DD).
   --search TEXT
       Only messages containing TEXT anywhere, including in the body.
+      Best-effort: an empty result is not proof of absence. See below.
   --limit N
       How many messages to return, counting back from the newest.
       Default: 50.
@@ -817,6 +819,22 @@ immediately. A command that has been running for half a minute with --from or
 tell the operator it is going to take a moment rather than letting them watch
 a silent terminal.
 
+--from and --search are also BEST-EFFORT, and this is the more important of the
+two warnings. Both are answered by the mail server's own content search, not by
+this CLI, and that search is known to miss messages: a message with unusual
+headers can be skipped even though it is really in the folder and really in the
+window you asked for. It is skipped silently, and nothing in the response
+distinguishes it from a message that does not exist. So an empty or small
+result from --from or --search is NOT proof of absence. Never report one as
+"there is no such mail". Say what you looked for, and say that this kind of
+search can miss things.
+
+When it matters whether something is there, do not use --from or --search at
+all. List the window instead, with --since and --mailbox and a --limit big
+enough to cover it, and read the addresses and subjects in the response
+yourself. Date-bounded listing does return the messages the content search
+misses, so that is the only way to answer "is there anything from X" as a fact.
+
 Newest first means newest by arrival, which is the order the account itself
 keeps. It is not the order of the Date header: that header is written by the
 sender's own machine, so a wrong clock there would otherwise push a message to
@@ -827,7 +845,11 @@ from, never a guess.
 
 "counts" gives two numbers: "matched" is how many messages the filters found,
 "returned" is how many came back after --limit. When they differ, say so
-rather than reporting the tail as the whole.
+rather than reporting the tail as the whole. With --from or --search,
+"matched" is what the server's content search returned, which makes it a lower
+bound rather than a total: "matched": 0 there means the search found nothing,
+not that the folder holds nothing. Read it as a count of hits, never as
+evidence of absence.
 
 Each message carries "uid" and "mailbox" together, because that pair is what
 `iitb mail read` and `iitb mail fetch` take. "hasAttachments" is true when the
