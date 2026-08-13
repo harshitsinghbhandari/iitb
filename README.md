@@ -1,5 +1,20 @@
 # iitb
 
+> ### This repository is the open shell only. It is not usable on its own.
+>
+> Everything the portals actually need lives in `iitb-core`, a separate
+> protected runtime. `iitb-core` is not publicly available, it is not
+> distributed here, and it is not on PyPI or any other index. Without it this
+> CLI does not function: every portal command answers error 498 `core_missing`
+> at exit 4, which is a clean refusal rather than a crash. `pip install iitb`
+> does not give you a working tool. Nothing in this repo will change that.
+>
+> A binarized `iitb-core` may be granted to people affiliated with IIT Bombay
+> who write in, solely at the author's discretion. That discretion is
+> absolute: asking is not a claim on it, there is no queue, and there is no
+> timeline. The address is dev@theharshitsingh.com, which is also the only
+> contact address for this project.
+
 An agent-first command line over the IIT Bombay portals: placements, Moodle,
 and mail. Everything prints one JSON object on stdout and nothing else, so an
 agent never has to parse prose.
@@ -11,11 +26,9 @@ never sends, deletes, moves or files an email. Reading a message does not even
 mark it read. That is a property of the whole surface rather than a default:
 there is no flag anywhere that turns writing on.
 
-**This repo is the command surface only.** It holds the command tree, the help
-text, the output envelope and the error-code registry. The implementation,
-`iitb-core`, is private and is not published anywhere, so this repo is not
-runnable on its own. What is here is the shape of the CLI, which is the part
-worth reading and the part worth copying.
+**What is here is the shape of the CLI**, which is the part worth reading and
+the part worth copying: the command tree, the help text, the output envelope
+and the error-code registry, and nothing about the portals themselves.
 
 ## The envelope
 
@@ -74,10 +87,10 @@ iitb --help
 ## Running it
 
 The shell is argparse plus one import of `iitb-core`, and `iitb-core` is
-private: it is not on PyPI, not on any public index, and not distributed. So
+protected: it is not on PyPI, not on any public index, and not distributed. So
 `pip install iitb` will not give you a working CLI, and nothing here pretends
 otherwise. The dependency is declared because it is real, not because it
-resolves.
+resolves. Obtaining a core at all is the notice at the top of this file.
 
 With the core present, the shell installs against it:
 
