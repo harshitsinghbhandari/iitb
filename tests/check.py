@@ -195,6 +195,30 @@ check(
     "270-289 is reserved for mail usage and was ruled deliberately empty",
 )
 
+# The rest of the 190 block, which two features reached at once. Metrics took
+# 192 first and keeps it; downloads moved up to 193, 194 and 195. Both halves
+# are pinned by name here, because the failure this guards against is silent:
+# the core carries these numbers on its exception classes and the shell trusts
+# them, so a downloads code sitting on 192 would report an unreachable file
+# service to the operator as "the usage counts could not be cleared".
+check(REGISTRY[192][0] == "metrics_unwritable", "192 is not metrics_unwritable")
+DOWNLOAD_CODES = {
+    193: "download_source_unreachable",
+    194: "download_not_found",
+    195: "download_session_recovery_failed",
+}
+for code, name in DOWNLOAD_CODES.items():
+    check(code in REGISTRY, f"download code {code} is missing from the registry")
+    check(REGISTRY[code][0] == name, f"{code} is not {name}")
+    # All three are exit 1. 194 in particular must never become exit 3: a dead
+    # link is not something signing in again would fix, and sending the operator
+    # to sign in for one wastes their time and leaves the link exactly as dead.
+    check(REGISTRY[code][1] == 1, f"download code {code} is not exit 1")
+check(
+    "iitb downloads --help" in REGISTRY[195][2],
+    "195 does not say where to report it",
+)
+
 # --- core exception names map to codes without importing the core -----------
 
 for class_name, expected in [
@@ -232,6 +256,9 @@ for class_name, expected in [
     ("MessageUnreadable", 156),
     ("MessageHasNoAttachments", 157),
     ("ConfigUnwritable", 191),
+    ("DownloadSourceUnreachable", 193),
+    ("DownloadNotFound", 194),
+    ("DownloadSessionRecoveryFailed", 195),
     ("ValueError", 499),
     ("SomethingNobodyNamedYet", 499),
 ]:
@@ -302,6 +329,16 @@ fails_with(["mail", "list", "--mailbox"], 201)
 # command line, so asking to is a usage error rather than a disclosure.
 fails_with(["mail", "login", "--token", "hunter2"], 202)
 fails_with(["mail", "login", "--password", "hunter2"], 202)
+
+# downloads fetch. A url is a string beyond being url-shaped, because which
+# services this CLI downloads from is the core's knowledge and a host list in
+# this repo would publish it. What the shell can reject is a value that is not a
+# url at all, and a missing one.
+fails_with(["downloads"], 200)
+fails_with(["downloads", "nonsense"], 200)
+fails_with(["downloads", "fetch"], 201)
+fails_with(["downloads", "fetch", "not-a-url"], 202)
+fails_with(["downloads", "fetch", "   "], 202)
 
 # The defaults the help blocks state, held to the blocks rather than to the
 # core: a block that says "Default: INBOX" over a parser that says something
@@ -559,6 +596,8 @@ for argv, block in [
     (["browser"], cli.BROWSER_HELP),
     (["browser", "login"], cli.BROWSER_LOGIN_HELP),
     (["browser", "sso-status"], cli.BROWSER_SSO_STATUS_HELP),
+    (["downloads"], cli.DOWNLOADS_HELP),
+    (["downloads", "fetch"], cli.DOWNLOADS_FETCH_HELP),
     (["downloads", "set-default"], cli.DOWNLOADS_SET_DEFAULT_HELP),
     (["placements"], cli.PLACEMENTS_HELP),
     (["placements", "jobs"], cli.PLACEMENTS_JOBS_HELP),
@@ -601,7 +640,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 25, f"the tree has {len(tree)} leaves, expected 25")
+check(len(tree) == 26, f"the tree has {len(tree)} leaves, expected 26")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -613,6 +652,7 @@ sys.modules["iitb_core"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.placements"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.moodle"] = None  # type: ignore[assignment]
 sys.modules["iitb_core.mail"] = None  # type: ignore[assignment]
+sys.modules["iitb_core.downloads"] = None  # type: ignore[assignment]
 fails_with(["placements", "applications"], 498)
 fails_with(["browser", "status"], 498)
 fails_with(["moodle", "courses"], 498)
@@ -624,6 +664,7 @@ fails_with(["mail", "mailboxes"], 498)
 fails_with(["mail", "login"], 498)
 del sys.modules["iitb_core"], sys.modules["iitb_core.placements"]
 del sys.modules["iitb_core.moodle"], sys.modules["iitb_core.mail"]
+del sys.modules["iitb_core.downloads"]
 
 # --- the handshake: one integer, matched exactly, before any seam runs ------
 # The core here is a bare module carrying only API_VERSION, which is the
@@ -681,9 +722,8 @@ finally:
         sys.modules.pop(name, None)
 
 # --- downloads: the setting round-trips and survives being read back -------
-# No v1 command downloads, so the setting is exercised through the command that
-# writes it and the accessor a download command will read it with, rather than
-# through a consumer that does not exist yet.
+# Exercised through the command that writes it, the accessor the download
+# commands read it with, and each of the three fetches that consume it.
 
 with tempfile.TemporaryDirectory() as home:
     real_home = os.environ.get("HOME")
@@ -775,6 +815,26 @@ with tempfile.TemporaryDirectory() as home:
                 reached and reached[0][1].get("out") is None,
                 "mail fetch invented an --out instead of leaving the default and "
                 "its per-portal subfolder to the core",
+            )
+
+            # `downloads fetch` is the third consumer and makes the same
+            # pre-flight. The url reaches the core exactly as it was typed:
+            # deciding which services are downloadable is the core's, and a
+            # shell that rewrote a url would be guessing on the operator's
+            # behalf about a link it cannot read.
+            reached.clear()
+            (Path(home) / ".config" / "iitb" / "config.json").unlink()
+            fails_with(["downloads", "fetch", "scheme://host/f.pdf"], 203)
+            check(not reached, "downloads fetch reached the core with nowhere to write")
+
+            run("downloads", "set-default", str(Path(home) / "dl"))
+            reached.clear()
+            run("downloads", "fetch", " scheme://host/a%20file.pdf ", "--force")
+            check(
+                reached and reached[0][1] == {
+                    "url": "scheme://host/a%20file.pdf", "out": None, "force": True
+                },
+                f"downloads fetch passed {reached and reached[0][1]} to the core",
             )
         finally:
             core.call = canonical_call
@@ -897,6 +957,10 @@ with tempfile.TemporaryDirectory() as home:
             ("mail", "read"): ["mail", "read", "12", "--mailbox", "Some Folder"],
             ("mail", "fetch"): ["mail", "fetch", "12", "--out", elsewhere],
             ("downloads", "set-default"): ["downloads", "set-default", elsewhere],
+            ("downloads", "fetch"): [
+                "downloads", "fetch", "scheme://host/a%20file.pdf",
+                "--out", elsewhere,
+            ],
             ("version",): ["version"],
         }
         # `metrics` is the one leaf that is deliberately not counted.

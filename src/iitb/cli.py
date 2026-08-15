@@ -60,7 +60,8 @@ commands:
                your grades, the files, and what is coming up.
   mail         Read the operator's IITB email: folders, messages, and the
                files attached to them.
-  downloads    Configure where downloaded files are written.
+  downloads    Download a file by url using the operator's own identity, and
+               configure where downloaded files are written.
   metrics      Report how many times each iitb command has been run on this
                machine, and clear that record.
   version      Report the installed iitb and iitb-core versions.
@@ -101,7 +102,7 @@ Where to start:
   iitb placements --help     the placements command tree
   iitb moodle --help         the moodle command tree
   iitb mail --help           the mail command tree
-  iitb downloads --help      set the default download directory once
+  iitb downloads --help      download a file by url, set where files land
   iitb metrics               how often each command has been run here
   iitb version               which versions are installed
 
@@ -259,14 +260,74 @@ with a "reason", and the command exits 0.
 DOWNLOADS_HELP = """
 usage: iitb downloads <command>
 
-Configure where this CLI writes the files it downloads.
+Download a file by url, and configure where downloaded files are written.
 
 commands:
+  fetch         Download one file by url, using the operator's own identity.
   set-default   Set the default download directory.
 
-The setting is shared by every portal, and each portal writes into its own
-folder underneath it. No command downloads a file yet; set this once and it
-will be there when one does.
+The setting is shared by every command that downloads, and each source writes
+into its own folder underneath it. `iitb moodle fetch` and `iitb mail fetch`
+use the same setting.
+
+`fetch` here is the one for a link: something the operator was sent or read,
+that opens for them and not for a stranger. It is the command to reach for
+when you have a url and no other handle on the file.
+"""
+
+DOWNLOADS_FETCH_HELP = """
+usage: iitb downloads fetch <url> [--out PATH] [--force]
+
+Download one file that opens only for the operator's own IITB identity.
+
+positional arguments:
+  url
+      The url of the file, exactly as it was published: in an announcement, in
+      an email, wherever the operator found it. Give the link to the file
+      itself, not the page that mentions it.
+
+options:
+  --out PATH
+      Where to write the file. If PATH is an existing directory, the file is
+      written into it under its published filename. Otherwise PATH is the
+      filename to write.
+      Without --out, the file goes to a folder named for the service it came
+      from, inside your default download directory, which is set once with
+      `iitb downloads set-default`. Until that is set, --out is required.
+  --force
+      Overwrite an existing file. Without it, an existing file is an error and
+      nothing is written.
+
+Not every url works, and the ones that do not fail before anything is
+downloaded, with "detail" saying which url was refused and why. Two in
+particular: a file on Moodle is `iitb moodle fetch`, which can also name it by
+activity id, and a file attached to an email is `iitb mail fetch`.
+
+A link to a file on a third-party drive is refused as well. The browser this
+CLI owns carries the operator's IITB sign-on and is signed in to nothing else,
+those are separate identities, and signing in to another one is not something
+this CLI does or may be asked to do. Hand that link to the operator instead.
+
+The file is written under the name the source publishes it as, which is often
+not the text of the link and sometimes has no extension. The name is never
+invented and an extension is never added; the response reports the content
+type so you can tell the operator what the file actually is.
+
+On success the response gives the absolute path written, the byte count, the
+content type, and a sha256, so a repeated download can be recognised without
+reading the file.
+
+This command never writes a file that is not the file you asked for. If it
+cannot get the real file it fails and writes nothing at all, not even a partial
+file. It only ever reads: downloading changes nothing wherever the file lives.
+
+A link that has expired or been withdrawn fails with "download_not_found".
+That is a fact about the link, not about this CLI: ask the operator for a
+current one rather than retrying or asking them to sign in.
+
+Downloaded files are routinely other people's personal data: names, roll
+numbers, phone numbers. Do not copy what is inside one into a repository, an
+issue, a pull request, or any shared log.
 """
 
 DOWNLOADS_SET_DEFAULT_HELP = """
@@ -1227,6 +1288,20 @@ def fetch_target(raw: str) -> str:
     return text
 
 
+def download_url(raw: str) -> str:
+    """Something url-shaped, and nothing else reaches the core.
+
+    Shape only, like `fetch_target`. Which urls this CLI actually downloads from
+    is the core's to decide, because that vocabulary does not live in this repo.
+    Checking the shape here still earns its place: it turns a typo into a usage
+    error instead of a browser start.
+    """
+    text = raw.strip()
+    if not text or "://" not in text:
+        raise argparse.ArgumentTypeError(f"{raw!r} is not a url")
+    return text
+
+
 def iso_date(raw: str) -> str:
     try:
         return date.fromisoformat(raw).isoformat()
@@ -1245,6 +1320,7 @@ BROWSER = "iitb_core.browser"
 PLACEMENTS = "iitb_core.placements"
 MOODLE = "iitb_core.moodle"
 MAIL = "iitb_core.mail"
+DOWNLOADS = "iitb_core.downloads"
 
 
 def browser_start(args) -> dict:
@@ -1296,6 +1372,20 @@ def browser_sso_status(args) -> dict:
 
 def downloads_set_default(args) -> dict:
     return config.set_download_dir(args.path)
+
+
+def downloads_fetch(args) -> object:
+    """The same pre-flight the two portal fetches make, for the same reason.
+
+    Nowhere to write is knowable here, with nothing live involved, and deciding
+    it now is what makes the promise in the help text true: this fails before
+    the network rather than after downloading a file it has nowhere to put.
+    """
+    if args.out is None and config.download_dir() is None:
+        raise CliError(203)
+    return core.call(
+        DOWNLOADS, "fetch", url=args.url, out=args.out, force=args.force
+    )
 
 
 def placements_jobs(args) -> object:
@@ -1744,8 +1834,20 @@ def _build_browser(top) -> None:
 
 
 def _build_downloads(top) -> None:
+    """The setting, and the one command that takes a url and nothing else.
+
+    A url is a plain string here beyond being url-shaped: which services this
+    CLI downloads from is the core's knowledge, and rejecting a host in this
+    repo would publish the list of hosts it accepts.
+    """
     downloads = make(top, "downloads", DOWNLOADS_HELP)
     sub = commands(downloads, "subcommand")
+
+    fetch = make(sub, "fetch", DOWNLOADS_FETCH_HELP, downloads_fetch)
+    hidden(fetch, "url", metavar="<url>", type=download_url)
+    hidden(fetch, "--out", metavar="PATH", default=None)
+    hidden(fetch, "--force", action="store_true")
+
     set_default = make(
         sub, "set-default", DOWNLOADS_SET_DEFAULT_HELP, downloads_set_default
     )

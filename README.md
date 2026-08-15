@@ -86,7 +86,7 @@ iitb browser     start, attach, status, sso-status, stop, login
 iitb placements  jobs, job, deadlines, applications, blog posts, blog post
 iitb moodle      courses, course, deadlines, grades, fetch
 iitb mail        login, mailboxes, list, read, fetch
-iitb downloads   set-default
+iitb downloads   fetch, set-default
 iitb metrics
 iitb version
 ```
@@ -99,6 +99,7 @@ iitb placements jobs --status open --company acme
 iitb moodle deadlines --announcements 10
 iitb moodle course "XX 101" --no-content
 iitb mail list --unseen --since 2026-08-01
+iitb downloads fetch <the url of a file only you can open>
 ```
 
 `--help` is the documentation. The whole tree is discoverable from it, which
