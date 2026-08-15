@@ -68,6 +68,18 @@ def read() -> dict[str, int]:
     truncated write, a hand edit, a file left by a version that stored
     something else, all read as "no counts yet" rather than as a failure of
     whatever command happened to be running.
+
+    Keys are stripped and then merged, so a file that already holds
+    `"moodle.courses"` beside `"moodle.courses "` comes back as one command
+    with the two counts added together. That is a repair rather than a
+    tolerance: a file like that has one command's runs split across two rows,
+    and adding them is the only reading that does not throw some of them away.
+    It heals in memory here and reaches disk on the next run that records
+    anything, because reading the counts must never write to them.
+
+    Whitespace cannot get into a key from here on, so this is for files
+    already on disk. It stays because the alternative is asking the operator
+    to reset a counter they never asked for to fix damage they did not do.
     """
     try:
         stored = json.loads(path().read_text(encoding="utf-8"))
@@ -75,11 +87,15 @@ def read() -> dict[str, int]:
         return {}
     if not isinstance(stored, dict):
         return {}
-    return {
-        name: count
-        for name, count in stored.items()
-        if isinstance(name, str) and isinstance(count, int)
-    }
+    counts: dict[str, int] = {}
+    for name, count in stored.items():
+        if not isinstance(name, str) or not isinstance(count, int):
+            continue
+        name = name.strip()
+        if not name:
+            continue
+        counts[name] = counts.get(name, 0) + count
+    return counts
 
 
 def record(command_path: str | None) -> None:
@@ -91,7 +107,15 @@ def record(command_path: str | None) -> None:
     this repo's own command names and cannot carry anything the operator
     typed; passing anything else in would break the promise in the docstring
     above.
+
+    The name is stripped before it is used. The parser cannot produce a name
+    that needs it, which is exactly why the strip is here: this is the single
+    line through which every key in the file passes, so normalising it once
+    makes "a key never carries surrounding whitespace" a property of the
+    module rather than a property of every caller being careful. A name that
+    is nothing but whitespace is dropped rather than stored under "".
     """
+    command_path = (command_path or "").strip()
     if not command_path or not counting():
         return
     # ponytail: read, add one, write. Two commands finishing in the same
