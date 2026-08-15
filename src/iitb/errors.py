@@ -25,10 +25,13 @@ not a meaning one, so they are reused as written: minting `file_fetch_failed`
 alongside `document_fetch_failed` would give the CLI two codes for one
 condition, which is the one thing a registry exists to prevent.
 
-`iitb downloads fetch` reuses all five and adds 192, 193 and 194 for the three
+`iitb downloads fetch` reuses all five and adds 193, 194 and 195 for the three
 conditions none of them covers: the service is unreachable, the link is dead,
 and a session that could not be established. They are in the 190 block rather
-than a portal's, because the command belongs to no portal.
+than a portal's, because the command belongs to no portal, and they sit above
+192 rather than at it because `metrics_unwritable` shipped there first. That is
+the permanence rule doing its job: the number that had already been published
+kept its meaning, and the one that had not was the one that moved.
 
 Block reservations::
 
@@ -37,7 +40,8 @@ Block reservations::
     140-149  moodle
     150-169  mail             (150-157 defined, 158-169 free)
     170-189  browser          (170-171 defined, 172-189 free)
-    190-199  shared: config and downloads (190-194 defined, 195-199 free)
+    190-199  shared: config, metrics and downloads
+                              (190-195 defined, 196-199 free)
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
     240-269  moodle usage     (reserved; examined and deliberately empty)
@@ -384,11 +388,30 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         1,
         "The setting could not be saved under ~/.config/iitb/.",
     ),
+    # Only `iitb metrics --reset` can raise this. Writing a count never can:
+    # counting is a side effect nobody asked for, so a write that fails is
+    # swallowed and the command it was riding along with answers as if nothing
+    # had happened. Clearing them is a request, and a request that quietly did
+    # not happen is worse than one that failed out loud.
+    192: (
+        "metrics_unwritable",
+        1,
+        "The local usage counts under ~/.config/iitb/ could not be cleared, so "
+        "they are still there.",
+    ),
     # `iitb downloads fetch` finally uses the rest of the block the setting was
     # given. It is not a portal command, so its failures are not in a portal's
     # block: it takes a url from wherever the operator found it, and numbering
     # it under one surface would be wrong the first time it covers a second.
-    192: (
+    #
+    # These three were drafted as 192, 193 and 194 and are 193, 194 and 195
+    # because metrics reached this table first and took 192. Renumbering here
+    # rather than there is the rule working exactly as written: 192 shipped as
+    # `metrics_unwritable`, so 192 means that permanently, and a number that has
+    # not shipped yet is the one that moves. The core's exception classes were
+    # renumbered to match in the same breath, because the core carries the
+    # number and the shell reads it.
+    193: (
         "download_source_unreachable",
         1,
         "Could not reach the service that url points at. Check the network and "
@@ -396,14 +419,14 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
     ),
     # A fact about the link rather than about iitb, which is why it is not 121:
     # 121 is worth another attempt and this is not.
-    193: (
+    194: (
         "download_not_found",
         1,
         "There is no file behind that link. Links to shared files expire and "
         "are withdrawn, so ask the operator for a current one. Retrying will "
         "not help, and neither will signing in again.",
     ),
-    194: (
+    195: (
         "download_session_recovery_failed",
         1,
         "Could not establish a session with the service that url points at. "

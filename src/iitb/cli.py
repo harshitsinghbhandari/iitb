@@ -38,7 +38,7 @@ import traceback
 from datetime import date, datetime, timezone
 from importlib import metadata
 
-from . import config, core
+from . import config, core, metrics
 from .errors import CliError
 
 # ----------------------------------------------------------------------
@@ -62,6 +62,8 @@ commands:
                files attached to them.
   downloads    Download a file by url using the operator's own identity, and
                configure where downloaded files are written.
+  metrics      Report how many times each iitb command has been run on this
+               machine, and clear that record.
   version      Report the installed iitb and iitb-core versions.
 
 Every command prints exactly one JSON object on stdout and nothing else.
@@ -101,6 +103,7 @@ Where to start:
   iitb moodle --help         the moodle command tree
   iitb mail --help           the mail command tree
   iitb downloads --help      download a file by url, set where files land
+  iitb metrics               how often each command has been run here
   iitb version               which versions are installed
 
 Portal commands start the browser themselves and restore an expired
@@ -1007,6 +1010,52 @@ An attachment is a file a stranger sent. Write it where the operator asked and
 nowhere else, never into a repository, and treat what is inside it as theirs.
 """
 
+METRICS_HELP = """
+usage: iitb metrics [--reset]
+
+Report how many times each iitb command has been run on this machine.
+
+options:
+  --reset
+      Forget every count and delete the file. Reports how many runs were
+      forgotten. There is no undo, and there is nowhere else the numbers
+      exist to be recovered from.
+
+  {"ok": true, "data": {"commands": {"<command path>": <count>, ...},
+                        "total": <count>, "file": <path>,
+                        "counting": true}}
+
+A command path is the command as you would type it with dots instead of
+spaces: "moodle.courses", "placements.blog.posts", "mail.list".
+
+This is a local counter and nothing else. It is a small JSON file of command
+names and numbers under ~/.config/iitb/, on this machine, written by this CLI
+as it dispatches and read back by this command. Nothing sends it anywhere:
+there is no endpoint, no upload, no account, no flag that turns sending on,
+and no code in this CLI that could send it. It is not telemetry, and it is
+not the beginning of any.
+
+It records what was run, never what was asked. A count is keyed by the
+command path alone. No argument, no flag value, no search text, no folder
+name, no address, no filename, and nothing that came back from a portal is
+stored, so the file is safe to hand to anyone.
+
+"counting" is false when IITB_NO_METRICS is set in the environment. Set it to
+anything non-empty and no command increments anything. This readout still
+works with it set, because reading a file is not counting, and nothing else
+about the CLI changes.
+
+Counting never affects a command. It happens on the way to the work, it is no
+part of any answer, and every failure it can have is swallowed: a command
+prints the same object and exits the same code whether the count was written,
+could not be written, or was switched off. `--reset` is the exception, because
+clearing them is something you asked for: it fails with error 192 if the file
+is there and will not go.
+
+This command is not itself counted. A readout that was the loudest entry in
+its own report would be worth nothing to read.
+"""
+
 VERSION_HELP = """
 usage: iitb version
 
@@ -1612,6 +1661,19 @@ def report_version(args) -> dict:
     return version_data()
 
 
+def report_metrics(args) -> dict:
+    """The local run counts, or what clearing them threw away.
+
+    One shape either way, with `cleared` added when there was a reset, so a
+    consumer reads the same fields whichever it asked for. After a reset the
+    counts are empty because they really are: this reports the state it is
+    leaving behind rather than the state it found.
+    """
+    if not args.reset:
+        return metrics.summary()
+    return {"cleared": metrics.clear(), **metrics.summary()}
+
+
 # ----------------------------------------------------------------------
 # The parser tree
 # ----------------------------------------------------------------------
@@ -1690,7 +1752,16 @@ def split_help(block: str) -> tuple[str, str]:
 
 
 def make(parent, name: str, block: str, handler=None) -> Parser:
-    """Add one subcommand whose --help is the given block, verbatim."""
+    """Add one subcommand whose --help is the given block, verbatim.
+
+    Also carries the path down: each subcommand knows what it is called and
+    what it hangs off, so a leaf ends up with `command_path` set to
+    "placements.blog.posts" and the run counter has a name to count under
+    without anything having to reconstruct one from the parsed arguments.
+    argparse's own `prog` would have been that name for free, except that the
+    usage strings here are verbatim multi-line blocks, which is what `prog`
+    gets built out of on a subparser.
+    """
     usage, description = split_help(block)
     parser = parent.add_parser(
         name,
@@ -1700,15 +1771,18 @@ def make(parent, name: str, block: str, handler=None) -> Parser:
         add_help=False,
     )
     parser.add_argument("-h", "--help", action="help", help=argparse.SUPPRESS)
+    parser.path = getattr(parent, "path", ()) + (name,)
     if handler is not None:
-        parser.set_defaults(handler=handler)
+        parser.set_defaults(handler=handler, command_path=".".join(parser.path))
     return parser
 
 
 def commands(parser: Parser, dest: str):
-    return parser.add_subparsers(
+    action = parser.add_subparsers(
         dest=dest, metavar="<command>", required=True, help=argparse.SUPPRESS
     )
+    action.path = getattr(parser, "path", ())
+    return action
 
 
 def hidden(parser: Parser, *args, **kwargs):
@@ -1734,6 +1808,16 @@ def build_parser() -> Parser:
     _build_moodle(top)
     _build_mail(top)
     _build_downloads(top)
+
+    # The readout does not count itself, which is what `command_path=None`
+    # says: `record` is handed nothing and does nothing. A command whose whole
+    # job is to report the counts would otherwise be the loudest entry in
+    # them, and `--reset` would report having cleared the run that was the
+    # reset.
+    counts = make(top, "metrics", METRICS_HELP, report_metrics)
+    counts.set_defaults(command_path=None)
+    hidden(counts, "--reset", action="store_true")
+
     make(top, "version", VERSION_HELP, report_version)
     return root
 
@@ -1961,6 +2045,13 @@ def main(argv: list[str] | None = None) -> int:
 def dispatch(argv: list[str] | None) -> int:
     try:
         args = build_parser().parse_args(argv)
+        # Counted here, before the work rather than after it, because the
+        # question is how often a command was run and a command that then
+        # failed was still run. It is handed the name the parser resolved and
+        # never an argument value, it writes nowhere but the operator's own
+        # laptop, and it swallows every failure it can have: nothing below
+        # this line may depend on it, and stdout must not know it happened.
+        metrics.record(getattr(args, "command_path", None))
         emit({"ok": True, "data": args.handler(args)})
         return 0
     except Answered as answer:  # --version, produced during the parse
