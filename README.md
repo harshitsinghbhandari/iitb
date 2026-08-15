@@ -55,6 +55,25 @@ non-zero exit.
 are the two numbers a bug report needs. `iitb --version` answers the same
 object and points back at the command.
 
+## The run counter
+
+`iitb metrics` reports how many times each command has been run on this
+machine, and `iitb metrics --reset` forgets it.
+
+**It is local and it is not telemetry.** The counts are a small JSON file of
+command names and numbers under `~/.config/iitb/`, on that machine, and
+nothing sends them anywhere: there is no endpoint, no upload, no account, no
+flag that turns sending on, and no code in this repo that could send them.
+Set `IITB_NO_METRICS` to anything non-empty and nothing is counted at all.
+
+It records what was run and never what was asked. A count is keyed by the
+command path alone, `moodle.courses` or `placements.blog.posts`, so no
+argument, flag value, search term, folder name, address or filename is ever
+stored and the file is safe to hand to anyone. Counting is a side effect on
+the way past and every failure it can have is swallowed: a command prints the
+same object and exits the same code whether the count was written, could not
+be written, or was switched off.
+
 ## The tree
 
 ```
@@ -63,6 +82,7 @@ iitb placements  jobs, job, deadlines, applications, blog posts, blog post
 iitb moodle      courses, course, deadlines, grades, fetch
 iitb mail        login, mailboxes, list, read, fetch
 iitb downloads   set-default
+iitb metrics
 iitb version
 ```
 
@@ -111,8 +131,10 @@ python3 tests/check.py
 No dependencies, no network, no browser, and no core needed. It covers what
 this repo owns: the envelope, the error-code registry, the exit-code mapping,
 argument parsing, that no command anywhere in the tree accepts a secret as an
-argument, that no institute hostname or url is in the source, and that every
-`--help` in the tree prints its block verbatim. Portal behaviour is verified
+argument, that no institute hostname or url is in the source, that the run
+counter stores command names and nothing that was typed and cannot change
+what a command prints, and that every `--help` in the tree prints its block
+verbatim. Portal behaviour is verified
 live against the real thing, because that is the only place it can be verified
 honestly.
 
@@ -123,6 +145,7 @@ src/iitb/cli.py      the command tree, the help text, dispatch
 src/iitb/errors.py   the error-code registry: code, name, exit code, message
 src/iitb/core.py     the one seam into the private core
 src/iitb/config.py   settings under ~/.config/iitb/
+src/iitb/metrics.py  the local run counter under ~/.config/iitb/
 ```
 
 No portal knowledge lives in this repo, and none ever will. No hostname, no

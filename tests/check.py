@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iitb import cli, core  # noqa: E402
+from iitb import cli, core, metrics  # noqa: E402
 from iitb.errors import REGISTRY, CliError  # noqa: E402
 
 failures: list[str] = []
@@ -524,6 +524,7 @@ for argv, block in [
     (["mail", "list"], cli.MAIL_LIST_HELP),
     (["mail", "read"], cli.MAIL_READ_HELP),
     (["mail", "fetch"], cli.MAIL_FETCH_HELP),
+    (["metrics"], cli.METRICS_HELP),
     (["version"], cli.VERSION_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
@@ -544,7 +545,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 24, f"the tree has {len(tree)} leaves, expected 24")
+check(len(tree) == 25, f"the tree has {len(tree)} leaves, expected 25")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -741,6 +742,176 @@ with tempfile.TemporaryDirectory() as home:
         else:
             os.environ["HOME"] = real_home
 
+# --- metrics: local counts that cannot leak and cannot break a command -----
+# Four properties, and every one of them is the feature rather than a detail
+# of it: dispatching counts, the file holds command names and nothing the
+# operator typed, the opt-out really stops the writing, and a counter that
+# cannot be written changes neither stdout nor the exit code. The core is
+# replaced throughout so that counting a portal command costs no network.
+
+
+def raw(*argv):
+    """Run the CLI and return its exit code with stdout exactly as written."""
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = cli.main(list(argv))
+    return code, out.getvalue()
+
+
+with tempfile.TemporaryDirectory() as home:
+    real_home = os.environ.get("HOME")
+    os.environ["HOME"] = home
+    os.environ.pop(metrics.OPT_OUT, None)
+    counter = Path(home) / ".config" / "iitb" / "metrics.json"
+    canonical_call = core.call
+    try:
+        core.call = lambda *a, **k: {}
+
+        # Nothing has run yet, and asking does not create anything.
+        status, body = run("metrics")
+        check(status == 0, f"metrics: exit {status} != 0")
+        check(
+            body.get("data") == {
+                "commands": {}, "total": 0, "file": str(counter), "counting": True
+            },
+            f"metrics on a fresh machine returned {body.get('data')}",
+        )
+        check(not counter.exists(), "the readout created a counter file by reading")
+
+        # Dispatching counts, once per run, under the dotted command path.
+        run("downloads", "set-default", str(Path(home) / "dl"))
+        run("downloads", "set-default", str(Path(home) / "dl"))
+        run("placements", "blog", "posts")
+        run("mail", "list", "--mailbox", "Some Folder", "--search", "a-private-phrase")
+        check(counter.is_file(), "four dispatched commands wrote no counter file")
+        stored = json.loads(counter.read_text(encoding="utf-8")) if counter.is_file() else {}
+        check(
+            stored == {
+                "downloads.set-default": 2,
+                "placements.blog.posts": 1,
+                "mail.list": 1,
+            },
+            f"four runs of three commands counted as {stored}",
+        )
+
+        # The file is command names and numbers, and it is safe to hand to
+        # anyone. Every key is a real leaf of the command tree, which is the
+        # strong form of that promise: a key the operator typed cannot be one.
+        known = {".".join(path) for path in leaves(cli.build_parser())}
+        check(
+            set(stored) <= known,
+            f"the counter holds {sorted(set(stored) - known)}, which are not commands",
+        )
+        check(
+            all(isinstance(count, int) for count in stored.values()),
+            "the counter holds something that is not a count",
+        )
+        text = counter.read_text(encoding="utf-8")
+        for typed in ("a-private-phrase", "Some Folder", str(Path(home) / "dl")):
+            check(typed not in text, f"the counter recorded {typed!r}, which was typed")
+
+        # The readout reports them, and is not itself in them.
+        status, body = run("metrics")
+        check(body.get("data", {}).get("commands") == stored, "the readout lost counts")
+        check(body.get("data", {}).get("total") == 4, "the readout mis-totalled")
+        check(
+            "metrics" not in body.get("data", {}).get("commands", {}),
+            "the readout counted itself, which makes it the loudest thing it reports",
+        )
+
+        # The opt-out stops the writing and nothing else.
+        os.environ[metrics.OPT_OUT] = "1"
+        before = counter.read_text(encoding="utf-8")
+        status, body = run("downloads", "set-default", str(Path(home) / "dl"))
+        check(status == 0, f"a command with counting off: exit {status} != 0")
+        check(
+            counter.read_text(encoding="utf-8") == before,
+            f"{metrics.OPT_OUT} did not stop the counter being written",
+        )
+        status, body = run("metrics")
+        check(status == 0, f"the readout with counting off: exit {status} != 0")
+        check(
+            body.get("data", {}).get("counting") is False,
+            "the readout does not report that counting is switched off",
+        )
+        check(
+            body.get("data", {}).get("commands") == stored,
+            "counting off also stopped the readout, which only reads a file",
+        )
+        del os.environ[metrics.OPT_OUT]
+
+        # A counter that cannot be written changes nothing a caller can see:
+        # same bytes on stdout, same exit code. A directory where the file
+        # goes is the failure that survives any permission model.
+        counter.unlink()
+        counter.mkdir()
+        broken_status, broken_text = raw("downloads", "set-default", str(Path(home) / "dl"))
+        counter.rmdir()
+        working_status, working_text = raw("downloads", "set-default", str(Path(home) / "dl"))
+        check(
+            (broken_status, broken_text) == (working_status, working_text),
+            "an unwritable counter changed what the command printed or returned",
+        )
+        check(broken_status == 0, f"an unwritable counter made the command exit {broken_status}")
+
+        # A corrupt counter reads as no counts rather than as a failure, and
+        # the next run replaces it instead of inheriting the damage.
+        counter.write_text("{[", encoding="utf-8")
+        status, body = run("metrics")
+        check(status == 0, f"a corrupt counter made the readout exit {status}")
+        check(body.get("data", {}).get("commands") == {}, "a corrupt counter was believed")
+        run("placements", "applications")
+        check(
+            json.loads(counter.read_text(encoding="utf-8")) == {"placements.applications": 1},
+            "a run after a corrupt counter did not start it over",
+        )
+
+        # --reset forgets everything and says how much it forgot.
+        run("placements", "applications")
+        status, body = run("metrics", "--reset")
+        check(status == 0, f"metrics --reset: exit {status} != 0")
+        check(body.get("data", {}).get("cleared") == 2, "--reset mis-counted what it forgot")
+        check(
+            (body["data"]["commands"], body["data"]["total"]) == ({}, 0),
+            "--reset reported the counts it found rather than the ones it left",
+        )
+        check(not counter.exists(), "--reset left the counter file behind")
+        # Clearing nothing is not an error.
+        status, body = run("metrics", "--reset")
+        check(status == 0, f"a second --reset exited {status}")
+        check(body.get("data", {}).get("cleared") == 0, "a second --reset forgot something")
+
+        # A reset that cannot happen is reported, unlike a write that cannot
+        # happen: one was asked for and the other was not.
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            run("placements", "applications")
+            directory = counter.parent
+            directory.chmod(0o500)
+            try:
+                fails_with(["metrics", "--reset"], 192)
+            finally:
+                directory.chmod(0o700)
+            check(counter.exists(), "a failed --reset reported failure and still deleted")
+    finally:
+        core.call = canonical_call
+        os.environ.pop(metrics.OPT_OUT, None)
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+
+# Counting is local, and the only guard that can say so in a public file is
+# the shape one: this module may not name a url, a host, or anything that
+# sends. The banned-import check over `src` covers the rest.
+metrics_source = (
+    Path(__file__).resolve().parent.parent / "src" / "iitb" / "metrics.py"
+).read_text(encoding="utf-8")
+for banned in ("import socket", "import urllib", "import http", "urlopen", "sendall"):
+    check(
+        banned not in metrics_source,
+        f"the run counter contains {banned!r}; it is local only and sends nothing",
+    )
+
 # --- version is JSON on both routes, and --version points at the command ---
 
 # This check runs with nothing installed as happily as it runs inside the
@@ -910,6 +1081,6 @@ if failures:
     sys.exit(1)
 print(
     "ok: envelope, exit codes, error mapping, the core handshake, parsing, "
-    "help, downloads, version, no secret in argv, and one object on every "
-    "exit path"
+    "help, downloads, local run counts, version, no secret in argv, and one "
+    "object on every exit path"
 )

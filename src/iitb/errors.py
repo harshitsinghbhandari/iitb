@@ -379,6 +379,17 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         1,
         "The setting could not be saved under ~/.config/iitb/.",
     ),
+    # Only `iitb metrics --reset` can raise this. Writing a count never can:
+    # counting is a side effect nobody asked for, so a write that fails is
+    # swallowed and the command it was riding along with answers as if nothing
+    # had happened. Clearing them is a request, and a request that quietly did
+    # not happen is worse than one that failed out loud.
+    192: (
+        "metrics_unwritable",
+        1,
+        "The local usage counts under ~/.config/iitb/ could not be cleared, so "
+        "they are still there.",
+    ),
     # --- 200 to 219: usage. Exit 2. -------------------------------------
     200: (
         "unknown_command",
