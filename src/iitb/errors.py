@@ -25,6 +25,11 @@ not a meaning one, so they are reused as written: minting `file_fetch_failed`
 alongside `document_fetch_failed` would give the CLI two codes for one
 condition, which is the one thing a registry exists to prevent.
 
+`iitb downloads fetch` reuses all five and adds 192, 193 and 194 for the three
+conditions none of them covers: the service is unreachable, the link is dead,
+and a session that could not be established. They are in the 190 block rather
+than a portal's, because the command belongs to no portal.
+
 Block reservations::
 
     100-109  shared: session, browser, runtime, and the shell itself
@@ -32,7 +37,7 @@ Block reservations::
     140-149  moodle
     150-169  mail             (150-157 defined, 158-169 free)
     170-189  browser          (170-171 defined, 172-189 free)
-    190-199  shared: config and downloads
+    190-199  shared: config and downloads (190-194 defined, 195-199 free)
     200-219  shared usage
     220-239  placements usage (reserved, none needed yet)
     240-269  moodle usage     (reserved; examined and deliberately empty)
@@ -378,6 +383,32 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "config_unwritable",
         1,
         "The setting could not be saved under ~/.config/iitb/.",
+    ),
+    # `iitb downloads fetch` finally uses the rest of the block the setting was
+    # given. It is not a portal command, so its failures are not in a portal's
+    # block: it takes a url from wherever the operator found it, and numbering
+    # it under one surface would be wrong the first time it covers a second.
+    192: (
+        "download_source_unreachable",
+        1,
+        "Could not reach the service that url points at. Check the network and "
+        "try again.",
+    ),
+    # A fact about the link rather than about iitb, which is why it is not 121:
+    # 121 is worth another attempt and this is not.
+    193: (
+        "download_not_found",
+        1,
+        "There is no file behind that link. Links to shared files expire and "
+        "are withdrawn, so ask the operator for a current one. Retrying will "
+        "not help, and neither will signing in again.",
+    ),
+    194: (
+        "download_session_recovery_failed",
+        1,
+        "Could not establish a session with the service that url points at. "
+        "This is not something the operator needs to do by hand; report it as "
+        "described by `iitb downloads --help`.",
     ),
     # --- 200 to 219: usage. Exit 2. -------------------------------------
     200: (

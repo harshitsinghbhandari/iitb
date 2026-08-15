@@ -50,6 +50,8 @@ The pinned core seams, one function per command::
     iitb_core.mail.read(uid=..., mailbox=...)
     iitb_core.mail.fetch(uid=..., mailbox=..., out=..., force=...)
 
+    iitb_core.downloads.fetch(url=..., out=..., force=...)
+
 `mail.login` is the one seam that is handed something the operator typed
 rather than something the command line carried, and the only one that takes a
 secret. It is passed through and not held: nothing in this repo stores, logs
