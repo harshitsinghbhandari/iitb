@@ -14,6 +14,7 @@ against the real thing, which is the only place it can be verified honestly.
 
 from __future__ import annotations
 
+import atexit
 import io
 import json
 import os
@@ -29,6 +30,61 @@ from iitb import cli, core, metrics  # noqa: E402
 from iitb.errors import REGISTRY, CliError  # noqa: E402
 
 failures: list[str] = []
+
+# --- this check runs against a scratch home, all of it -----------------------
+# Every command dispatched below writes a run count, so a check that ran
+# against the ambient home would count its own thirty-odd dispatches into the
+# operator's real ~/.config/iitb/, and a run of it under a deliberately broken
+# build would leave that damage behind in a file nobody thinks of as test
+# output. It has happened, which is why this is here.
+#
+# Redirected once, before the first dispatch, rather than section by section.
+# A redirect that each section has to remember is one a later section will
+# forget, and the way that failure announces itself is a wrong number in
+# somebody's real state directory rather than a failing check. The sections
+# below that set HOME for their own reasons still work: they save and restore
+# whatever they found, which is now this scratch directory.
+#
+# ~/.config/iitb/ is derived from the home directory and from nothing else, so
+# moving the home directory moves all of it: the settings, the error log, and
+# the counter.
+_scratch = tempfile.TemporaryDirectory()
+atexit.register(_scratch.cleanup)
+REAL_HOME = os.environ.get("HOME")
+os.environ["HOME"] = _scratch.name
+
+
+# Exactly the files this repo's own code writes, and no others. The state
+# directory also holds things the shell never touches, and one of them is a
+# browser profile that rewrites its own caches while it runs, so fingerprinting
+# the directory whole would fail this check whenever the operator happened to
+# have a browser up. Naming the three files keeps the guard about what the
+# shell did rather than about what else was happening on the machine.
+SHELL_WRITES = ("metrics.json", "config.json", "logs/internal-error.log")
+
+
+def real_state() -> tuple | None:
+    """A fingerprint of the files this repo writes under the operator's home.
+
+    Taken before anything runs and again at the end. The property it pins is
+    the one the redirect above exists for, and it is worth pinning separately
+    because the redirect is a single line that a later edit could move, drop,
+    or run after the first dispatch without anything else noticing.
+    """
+    if not REAL_HOME:
+        return None
+    directory = Path(REAL_HOME) / ".config" / "iitb"
+    fingerprint = []
+    for name in SHELL_WRITES:
+        item = directory / name
+        try:
+            fingerprint.append((name, item.read_bytes()))
+        except OSError:  # not there, which is itself a state worth pinning
+            fingerprint.append((name, None))
+    return tuple(fingerprint)
+
+
+UNTOUCHED = real_state()
 
 
 def check(condition, label):
@@ -810,6 +866,136 @@ with tempfile.TemporaryDirectory() as home:
         for typed in ("a-private-phrase", "Some Folder", str(Path(home) / "dl")):
             check(typed not in text, f"the counter recorded {typed!r}, which was typed")
 
+        # Every leaf, dispatched for real, and the file it leaves behind.
+        # The table has to cover the tree exactly, so a command added later
+        # without a line here fails this rather than going uncounted and
+        # unchecked. `mail login` is dispatched too, with its prompts
+        # replaced: it is a leaf, so it counts, and stubbing it is cheaper
+        # than carving an exception into the rule.
+        elsewhere = str(Path(home) / "out")
+        dispatched = {
+            ("browser", "login"): ["browser", "login"],
+            ("browser", "start"): ["browser", "start"],
+            ("browser", "attach"): ["browser", "attach"],
+            ("browser", "status"): ["browser", "status"],
+            ("browser", "sso-status"): ["browser", "sso-status"],
+            ("browser", "stop"): ["browser", "stop"],
+            ("placements", "jobs"): ["placements", "jobs"],
+            ("placements", "job"): ["placements", "job", "12"],
+            ("placements", "deadlines"): ["placements", "deadlines"],
+            ("placements", "applications"): ["placements", "applications"],
+            ("placements", "blog", "posts"): ["placements", "blog", "posts"],
+            ("placements", "blog", "post"): ["placements", "blog", "post", "12"],
+            ("moodle", "courses"): ["moodle", "courses"],
+            ("moodle", "course"): ["moodle", "course", "XX 101"],
+            ("moodle", "deadlines"): ["moodle", "deadlines"],
+            ("moodle", "grades"): ["moodle", "grades"],
+            ("moodle", "fetch"): ["moodle", "fetch", "12", "--out", elsewhere],
+            ("mail", "login"): ["mail", "login", "someone"],
+            ("mail", "mailboxes"): ["mail", "mailboxes"],
+            ("mail", "list"): ["mail", "list", "--search", "another-private-phrase"],
+            ("mail", "read"): ["mail", "read", "12", "--mailbox", "Some Folder"],
+            ("mail", "fetch"): ["mail", "fetch", "12", "--out", elsewhere],
+            ("downloads", "set-default"): ["downloads", "set-default", elsewhere],
+            ("version",): ["version"],
+        }
+        # `metrics` is the one leaf that is deliberately not counted.
+        check(
+            set(dispatched) | {("metrics",)} == set(leaves(cli.build_parser())),
+            "the dispatch table and the command tree have drifted apart; every "
+            "leaf but `metrics` needs a line in it",
+        )
+
+        # The name a count is filed under, read off the parser rather than off
+        # a file. `record` strips defensively, so a space introduced up here
+        # would be absorbed before it reached disk and every file-level check
+        # would still pass while the cause sat there unnoticed. This is the
+        # layer that names it, and it is the one that fails first.
+        built = cli.build_parser()
+        for path, argv in dispatched.items():
+            resolved = built.parse_args(list(argv)).command_path
+            check(
+                resolved == ".".join(path),
+                f"`iitb {' '.join(path)}` resolves to the count name {resolved!r}",
+            )
+            check(
+                isinstance(resolved, str) and resolved == resolved.strip(),
+                f"`iitb {' '.join(path)}` resolves to a count name carrying "
+                f"surrounding whitespace: {resolved!r}",
+            )
+
+        counter.unlink()
+        quiet = io.StringIO()
+        canonical_stderr, canonical_getpass = sys.stderr, cli.getpass.getpass
+        try:
+            sys.stderr = quiet
+            cli.getpass.getpass = lambda prompt="", stream=None: "a-private-token"
+            for argv in dispatched.values():
+                run(*argv)
+        finally:
+            sys.stderr, cli.getpass.getpass = canonical_stderr, canonical_getpass
+
+        every = json.loads(counter.read_text(encoding="utf-8"))
+        # The property the trailing-space defect broke, named directly rather
+        # than left to follow from the leaf check: a key is exactly itself
+        # stripped. Whitespace on either side splits one command's runs over
+        # two rows, and it does it silently.
+        for name in every:
+            check(
+                name == name.strip(),
+                f"the counter wrote {name!r}, which carries surrounding whitespace",
+            )
+        check(
+            set(every) == {".".join(path) for path in dispatched},
+            "dispatching every leaf did not count every leaf exactly once under "
+            f"its own name: {sorted(set(every) ^ {'.'.join(p) for p in dispatched})}",
+        )
+        check(
+            set(every.values()) == {1},
+            f"one run of each leaf counted as {sorted(set(every.values()))}",
+        )
+        written = counter.read_text(encoding="utf-8")
+        for typed in ("a-private-phrase", "a-private-token", "Some Folder", elsewhere):
+            check(typed not in written, f"the counter recorded {typed!r}, which was typed")
+
+        # A file that already holds a split key is repaired rather than
+        # believed: the two rows are one command's runs and adding them is the
+        # only reading that throws none of them away. It heals in memory when
+        # read and reaches disk on the next run that records anything, because
+        # reading the counts must never write to them.
+        counter.write_text(
+            json.dumps(
+                {"moodle.courses ": 3, "moodle.courses": 21, " mail.list": 2,
+                 "mail.list": 5, "   ": 9}
+            ),
+            encoding="utf-8",
+        )
+        before_healing = counter.read_text(encoding="utf-8")
+        status, body = run("metrics")
+        check(status == 0, f"a split counter made the readout exit {status}")
+        check(
+            body.get("data", {}).get("commands") == {"moodle.courses": 24, "mail.list": 7},
+            f"a split counter read back as {body.get('data', {}).get('commands')}",
+        )
+        check(body.get("data", {}).get("total") == 31, "healing lost or invented runs")
+        check(
+            counter.read_text(encoding="utf-8") == before_healing,
+            "the readout rewrote the counter file; reading is not writing",
+        )
+        run("moodle", "courses")
+        check(
+            json.loads(counter.read_text(encoding="utf-8"))
+            == {"moodle.courses": 25, "mail.list": 7},
+            "the repair did not reach disk on the next run that recorded anything",
+        )
+        # Back to the four runs of three commands the sections below expect.
+        counter.unlink()
+        run("downloads", "set-default", str(Path(home) / "dl"))
+        run("downloads", "set-default", str(Path(home) / "dl"))
+        run("placements", "blog", "posts")
+        run("mail", "list", "--mailbox", "Some Folder", "--search", "a-private-phrase")
+        stored = json.loads(counter.read_text(encoding="utf-8"))
+
         # The readout reports them, and is not itself in them.
         status, body = run("metrics")
         check(body.get("data", {}).get("commands") == stored, "the readout lost counts")
@@ -1071,6 +1257,24 @@ for pattern, what in [
 ]:
     found = _re.search(pattern, source)
     check(found is None, f"the shell source contains {what}")
+
+# --- and none of that touched the operator's own state ----------------------
+# Last, because it has to be true of everything above it. Every command this
+# file dispatches writes a run count, so without the redirect at the top this
+# check would quietly count its own dispatches into a real counter, and a run
+# under a deliberately broken build would leave that damage in a real file.
+# The redirect is one line and this is what holds it in place.
+
+check(
+    real_state() == UNTOUCHED,
+    "this check wrote into the operator's own ~/.config/iitb/; it must run "
+    "entirely against the scratch home set at the top of this file",
+)
+check(
+    REAL_HOME is None or os.environ.get("HOME") != REAL_HOME,
+    "this check finished with HOME back on the operator's own directory, so "
+    "anything added after this line would dispatch against their real state",
+)
 
 # ---------------------------------------------------------------------------
 

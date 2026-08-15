@@ -74,6 +74,11 @@ the way past and every failure it can have is swallowed: a command prints the
 same object and exits the same code whether the count was written, could not
 be written, or was switched off.
 
+Counts are read back with their keys stripped and merged, so a file that
+somehow holds one command's runs split across two rows adds them together
+rather than reporting either half. That repair reaches disk on the next run
+that records anything; reading the counts never writes to them.
+
 ## The tree
 
 ```
@@ -128,7 +133,9 @@ argument parsing work regardless, and so does the check below.
 python3 tests/check.py
 ```
 
-No dependencies, no network, no browser, and no core needed. It covers what
+No dependencies, no network, no browser, and no core needed. It runs entirely
+against a scratch home directory, so it never reads or writes the state under
+your own `~/.config/iitb/`, and it checks that it did not. It covers what
 this repo owns: the envelope, the error-code registry, the exit-code mapping,
 argument parsing, that no command anywhere in the tree accepts a secret as an
 argument, that no institute hostname or url is in the source, that the run
