@@ -630,6 +630,7 @@ for argv, block in [
     (["mail", "fetch"], cli.MAIL_FETCH_HELP),
     (["metrics"], cli.METRICS_HELP),
     (["version"], cli.VERSION_HELP),
+    (["verify"], cli.VERIFY_HELP),
 ]:
     label = " ".join(["iitb"] + argv + ["--help"])
     status, text = run(*argv, "--help")
@@ -649,7 +650,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 42, f"the tree has {len(tree)} leaves, expected 42")
+check(len(tree) == 43, f"the tree has {len(tree)} leaves, expected 43")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -987,6 +988,7 @@ with tempfile.TemporaryDirectory() as home:
                 "--out", elsewhere,
             ],
             ("version",): ["version"],
+            ("verify",): ["verify"],
         }
         # `metrics` is the one leaf that is deliberately not counted.
         check(
@@ -1223,6 +1225,19 @@ else:
         flagged.get("data", {}).get("iitb_core") == body.get("data", {}).get("iitb_core"),
         "--version and `version` disagree about the core version",
     )
+
+# --- verify answers on a source install, with no stamp and no core ---
+
+status, body = run("verify")
+check(status == 0, f"verify: exit {status} != 0")
+check(
+    list(body.get("data", {})) == ["iitb", "license", "permissions", "for", "built_by"],
+    f"verify: data keys are {list(body.get('data', {}))}",
+)
+check(
+    (Path(cli.__file__).parent / "_stamp.py").exists() or body["data"]["for"] is None,
+    "verify: an unstamped install claims a recipient",
+)
 
 # --version must never fall through to unknown_command, installed or not.
 status, body = run("--version")
