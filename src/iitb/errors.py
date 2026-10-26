@@ -46,6 +46,8 @@ Block reservations::
     220-239  placements usage (reserved, none needed yet)
     240-269  moodle usage     (reserved; examined and deliberately empty)
     270-289  mail usage       (reserved; examined and deliberately empty)
+    300-329  asc operations
+    330-349  asc usage        (reserved; examined and deliberately empty)
     497-499  core
 
 Moodle was reserved 140-169 and defined 140-149. Mail took 150-169 out of the
@@ -470,6 +472,32 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
     # no core to speak to, 497 means there is one and the two halves do not
     # fit together. Only 497 can say which side to update, so folding them
     # into one code would cost exactly the sentence the consumer needs.
+    # ASC operations, 300 to 329. ASC usage, 330 to 349, is reserved.
+    300: (
+        "asc_login_needed", 3,
+        "No ASC sign-in is stored. Ask the operator to run `iitb asc login` "
+        "in their own terminal, then retry. Never ask for their password. "
+        "`iitb browser login` is a different system and will not help.",
+    ),
+    301: (
+        "off_campus_network", 1,
+        "ASC requires IIT Bombay wifi or VPN. Ask the operator to connect "
+        "and retry. Signing in will not help, and iitb never attempts the captcha.",
+    ),
+    302: ("asc_unreachable", 1, "Could not reach ASC. Check the network and try again."),
+    303: ("asc_http_error", 1, "ASC answered with an error. Report it if it continues."),
+    304: ("asc_response_unexpected", 1, "ASC returned a page this version cannot read. Report it."),
+    305: ("asc_access_refused", 1, "ASC refused this read after navigation was retried. Other commands may still work."),
+    306: ("asc_course_not_found", 1, "ASC has no course with that code there. Check the code with `iitb asc catalog`."),
+    307: ("asc_department_not_found", 1, "No department group matches. The detail lists available groups."),
+    308: ("asc_department_ambiguous", 1, "More than one department group matches. The detail lists candidates."),
+    309: ("asc_term_unavailable", 1, "ASC does not offer that year and semester. The detail lists the available range."),
+    310: (
+        "asc_login_failed", 3,
+        "ASC refused the sign-in. Ask the operator to run `iitb asc login` "
+        "again in their own terminal. Never ask for their password or retry "
+        "the same credential.",
+    ),
     497: (
         "core_incompatible",
         4,

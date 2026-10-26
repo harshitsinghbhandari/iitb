@@ -39,6 +39,7 @@ from datetime import date, datetime, timezone
 from importlib import metadata
 
 from . import config, core, metrics
+from . import asc_help
 from .errors import CliError
 
 # ----------------------------------------------------------------------
@@ -60,6 +61,7 @@ commands:
                your grades, the files, and what is coming up.
   mail         Read the operator's IITB email: folders, messages, and the
                files attached to them.
+  asc          Read the operator's academic record and ASC reference tables.
   downloads    Download a file by url using the operator's own identity, and
                configure where downloaded files are written.
   metrics      Report how many times each iitb command has been run on this
@@ -91,10 +93,11 @@ Branch on the exit code first and "error.name" second. "error.name" is a
 stable slug, so it stays true across renumbering; "error.code" is the
 3-digit number for the same thing.
 
-There are two doors, and sending the operator to the wrong one wastes
+There are three doors, and sending the operator to the wrong one wastes
 their time and fixes nothing:
   sso_session_ended                        `iitb browser login`
   mail_not_configured, mail_token_rejected `iitb mail login`
+  asc_login_needed, asc_login_failed       `iitb asc login`
 
 Where to start:
   iitb browser sso-status    is the operator signed in?
@@ -102,6 +105,7 @@ Where to start:
   iitb placements --help     the placements command tree
   iitb moodle --help         the moodle command tree
   iitb mail --help           the mail command tree
+  iitb asc --help            the academic record command tree
   iitb downloads --help      download a file by url, set where files land
   iitb metrics               how often each command has been run here
   iitb version               which versions are installed
@@ -113,7 +117,7 @@ never ask the operator to sign in, open a page, or click anything to make
 a command work unless a command exits 3.
 
 `iitb mail` is the exception to all of that: it uses no browser, it shares
-nothing with the other three, it has its own credential, and nothing can
+nothing with the other four, it has its own credential, and nothing can
 renew that credential except the operator running `iitb mail login`.
 
 Nothing is cached. Every invocation fetches live, so re-run a command
@@ -123,7 +127,7 @@ This CLI only reads. It never applies to a job, withdraws an application,
 uploads anything, posts a comment, starts a quiz attempt, submits an
 assignment, marks anything done, or sends, deletes or files an email.
 
-Reporting a failure: email dev@theharshitsingh.com. Do not open a GitHub
+Reporting a failure: email harshitsingh@iitb.ac.in. Do not open a GitHub
 issue and do not paste the output into one. A useful report contains portal
 data, and a GitHub issue is public and permanent.
 """
@@ -1320,6 +1324,7 @@ BROWSER = "iitb_core.browser"
 PLACEMENTS = "iitb_core.placements"
 MOODLE = "iitb_core.moodle"
 MAIL = "iitb_core.mail"
+ASC = "iitb_core.asc"
 DOWNLOADS = "iitb_core.downloads"
 
 
@@ -1585,6 +1590,36 @@ def mail_login(args) -> dict:
     return core.call(MAIL, "login", ldap_id=ldap_id, token=token)
 
 
+def asc_login(args) -> dict:
+    core.call(ASC, "login_ready")
+    sys.stderr.write(
+        "Run this in the operator's own terminal. The password is hidden "
+        "and must never be given to an agent or pasted into a chat.\n"
+    )
+    try:
+        username = ask("ASC LDAP id: ")
+        password = getpass.getpass("ASC LDAP password (hidden): ", stream=sys.stderr)
+    except (EOFError, KeyboardInterrupt):
+        raise CliError(201, detail="ASC login cancelled; nothing was stored") from None
+    if not username or not password:
+        raise CliError(201, detail="ASC login requires both prompts")
+    try:
+        return core.call(ASC, "login", username=username, password=password)
+    except CliError as exc:
+        # A credential-bearing call must never forward a runtime detail.
+        raise CliError(exc.code) from None
+    except BaseException:
+        raise CliError(499) from None
+
+
+def asc_logout(args) -> dict:
+    return core.call(ASC, "logout")
+
+
+def asc_read(name: str, **kwargs):
+    return core.call(ASC, name, **kwargs)
+
+
 def mail_mailboxes(args) -> object:
     return core.call(MAIL, "mailboxes")
 
@@ -1807,6 +1842,7 @@ def build_parser() -> Parser:
     _build_placements(top)
     _build_moodle(top)
     _build_mail(top)
+    _build_asc(top)
     _build_downloads(top)
 
     # The readout does not count itself, which is what `command_path=None`
@@ -1980,6 +2016,43 @@ def _build_mail(top) -> None:
     hidden(fetch, "--mailbox", metavar="NAME", default=DEFAULT_MAILBOX)
     hidden(fetch, "--out", metavar="PATH", default=None)
     hidden(fetch, "--force", action="store_true")
+
+
+def _build_asc(top) -> None:
+    asc = make(top, "asc", asc_help.ASC_ROOT_HELP)
+    sub = commands(asc, "subcommand")
+    make(sub, "login", asc_help.ASC_LOGIN_HELP, asc_login)
+    make(sub, "logout", asc_help.ASC_LOGOUT_HELP, asc_logout)
+    for name in ("courses", "grades", "cpi", "timetable", "attendance"):
+        make(sub, name, getattr(asc_help, f"ASC_{name.upper()}_HELP"),
+             lambda args, name=name: asc_read(name))
+
+    catalog = make(sub, "catalog", asc_help.ASC_CATALOG_HELP,
+                   lambda args: asc_read("catalog", dept=args.dept,
+                                         year=args.year, semester=args.semester))
+    hidden(catalog, "--dept", metavar="TEXT", default=None)
+    hidden(catalog, "--year", metavar="YYYY", type=positive_int, default=None)
+    hidden(catalog, "--semester", choices=("autumn", "spring", "summer", "winter"), default=None)
+
+    syllabus = make(sub, "syllabus", asc_help.ASC_SYLLABUS_HELP,
+                    lambda args: asc_read("syllabus", code=args.code))
+    hidden(syllabus, "code", metavar="<code>")
+
+    curriculum = make(sub, "curriculum", asc_help.ASC_CURRICULUM_HELP,
+                      lambda args: asc_read("curriculum", batch=args.batch,
+                                            department=args.department,
+                                            program=args.program))
+    hidden(curriculum, "--batch", metavar="YYYY", type=positive_int, default=None)
+    hidden(curriculum, "--department", metavar="TEXT", default=None)
+    hidden(curriculum, "--program", metavar="TEXT", default=None)
+
+    prereqs = make(sub, "prereqs", asc_help.ASC_PREREQS_HELP,
+                   lambda args: asc_read("prereqs", code=args.code))
+    hidden(prereqs, "code", metavar="<code>", nargs="?", default=None)
+
+    criteria = make(sub, "criteria", asc_help.ASC_CRITERIA_HELP,
+                    lambda args: asc_read("criteria", course=args.course))
+    hidden(criteria, "--course", metavar="CODE", default=None)
 
 
 # ----------------------------------------------------------------------
