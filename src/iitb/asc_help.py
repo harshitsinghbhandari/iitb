@@ -22,6 +22,7 @@ commands:
                 program.
   prereqs       Course prerequisites and equivalences.
   criteria      Pre-registration criteria for the coming term.
+  export        Collect ASC data into a resumable CSV.
 
 Every command prints exactly one JSON object on stdout and nothing else.
   success:  {"ok": true, "data": ...}
@@ -60,7 +61,8 @@ Reporting a failure: email harshitsingh@iitb.ac.in. Do not open a GitHub
 issue and do not paste the output into one. A useful report contains the
 operator's academic record, and a GitHub issue is public and permanent.
 
-Nothing is cached. Every invocation fetches live.
+Read commands fetch live. Export writes a local CSV and checkpoint so a
+collection can resume without repeating completed detail requests.
 
 This CLI only reads. It never registers, adjusts, drops or withdraws a
 course, changes a tag, submits an academic action, or signs the operator out. Where a
@@ -310,4 +312,37 @@ about the operator's own eligibility. Do not report "you are eligible"
 from this alone; the CPI bands are here, but where the operator's own CPI
 stands is `iitb asc cpi`, and the final say is the portal's at
 registration time.
+"""
+
+ASC_EXPORT_HELP = """usage: iitb asc export <dataset> --out PATH [options]
+
+Collect ASC data into a UTF-8 CSV. Supported datasets are running-courses,
+bulletin, syllabus, grading-statistics, and slot-pattern.
+Academic-record-summary exports the operator's completed term CPI and
+credit totals from Academic Record. Registration-status reports unavailable.
+Running Courses covers every department group in the selected terms.
+Syllabus includes codes offered in those terms. Venue Occupancy currently
+reports unsupported because no populated cell shape has been verified.
+Other dataset names are reserved and report an unsupported error until
+their page parsers are verified.
+
+options:
+  --years START:END      Academic starting years. Default: 2021 through 2026.
+  --semesters LIST       Comma-separated autumn,spring,summer,winter.
+                         Default: autumn,spring,summer through 2025,
+                         then current autumn 2026.
+  --departments LIST     Comma-separated group codes or name fragments.
+                         Bulletin accepts one numeric department code.
+  --batches LIST         Bulletin batch years, comma-separated.
+  --programs LIST        Bulletin program names or codes, comma-separated.
+                         Default: every program offered by the selected batch.
+  --plan                 Read required indices and report the exact
+                         remaining detail request count.
+  --resume               Continue a matching CSV and checkpoint.
+  --refresh              Replace rows for every selected unit.
+  --daily-ceiling N      At most N ASC data requests per day, max 1000.
+
+The command uses one ASC request at a time, about one per second. It saves
+progress after each group. A full multi-year export can take many requests;
+run --plan first. The checkpoint is written beside the CSV.
 """
