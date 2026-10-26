@@ -132,11 +132,13 @@ for code, (name, exit_code, message) in REGISTRY.items():
     )
 
 # Exit 3 means one thing across the whole surface: go and get the operator.
-# Three codes now say it, and each one has to name the command that fixes it,
+# Five codes now say it, and each one has to name the command that fixes it,
 # because they do not have the same remedy. A mail failure that sent someone to
 # `iitb browser login` would be a remedy that cannot work, told confidently.
 exit_three = sorted(code for code, row in REGISTRY.items() if row[1] == 3)
-check(exit_three == [103, 150, 151], f"exit 3 is {exit_three}, expected [103, 150, 151]")
+expected_exit_three = [103, 150, 151, 300, 310]
+check(exit_three == expected_exit_three,
+      f"exit 3 is {exit_three}, expected {expected_exit_three}")
 check(REGISTRY[103][0] == "sso_session_ended", "103 is not sso_session_ended")
 check("iitb browser login" in REGISTRY[103][2], "103 does not name its remedy")
 for code in (150, 151):
@@ -145,6 +147,13 @@ for code in (150, 151):
         "iitb browser login" not in REGISTRY[code][2],
         f"{code} sends the operator to the browser, which cannot fix mail",
     )
+for code, name in ((300, "asc_login_needed"), (310, "asc_login_failed")):
+    check(REGISTRY[code][0] == name, f"{code} is not {name}")
+    check("iitb asc login" in REGISTRY[code][2], f"{code} does not name its remedy")
+check("`iitb browser login` is a different system" in REGISTRY[300][2],
+      "300 does not warn against the wrong login")
+check("iitb browser login" not in REGISTRY[310][2],
+      "310 sends the operator to the wrong login")
 check(REGISTRY[104][1] == 1, "104 browser_unavailable must be exit 1, not exit 3")
 
 # 104 and 171 are two conditions with two remedies, and folding them back into
@@ -640,7 +649,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 26, f"the tree has {len(tree)} leaves, expected 26")
+check(len(tree) == 39, f"the tree has {len(tree)} leaves, expected 39")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -956,6 +965,19 @@ with tempfile.TemporaryDirectory() as home:
             ("mail", "list"): ["mail", "list", "--search", "another-private-phrase"],
             ("mail", "read"): ["mail", "read", "12", "--mailbox", "Some Folder"],
             ("mail", "fetch"): ["mail", "fetch", "12", "--out", elsewhere],
+            ("asc", "login"): ["asc", "login"],
+            ("asc", "logout"): ["asc", "logout"],
+            ("asc", "courses"): ["asc", "courses"],
+            ("asc", "grades"): ["asc", "grades"],
+            ("asc", "cpi"): ["asc", "cpi"],
+            ("asc", "timetable"): ["asc", "timetable"],
+            ("asc", "attendance"): ["asc", "attendance"],
+            ("asc", "catalog"): ["asc", "catalog"],
+            ("asc", "syllabus"): ["asc", "syllabus", "XX 101"],
+            ("asc", "curriculum"): ["asc", "curriculum"],
+            ("asc", "prereqs"): ["asc", "prereqs"],
+            ("asc", "criteria"): ["asc", "criteria"],
+            ("asc", "export"): ["asc", "export", "running-courses", "--out", elsewhere],
             ("downloads", "set-default"): ["downloads", "set-default", elsewhere],
             ("downloads", "fetch"): [
                 "downloads", "fetch", "scheme://host/a%20file.pdf",
@@ -990,14 +1012,19 @@ with tempfile.TemporaryDirectory() as home:
 
         counter.unlink()
         quiet = io.StringIO()
-        canonical_stderr, canonical_getpass = sys.stderr, cli.getpass.getpass
+        canonical_stderr, canonical_getpass, canonical_ask = (
+            sys.stderr, cli.getpass.getpass, cli.ask
+        )
         try:
             sys.stderr = quiet
             cli.getpass.getpass = lambda prompt="", stream=None: "a-private-token"
+            cli.ask = lambda prompt: "someone"
             for argv in dispatched.values():
                 run(*argv)
         finally:
-            sys.stderr, cli.getpass.getpass = canonical_stderr, canonical_getpass
+            sys.stderr, cli.getpass.getpass, cli.ask = (
+                canonical_stderr, canonical_getpass, canonical_ask
+            )
 
         every = json.loads(counter.read_text(encoding="utf-8"))
         # The property the trailing-space defect broke, named directly rather
@@ -1306,8 +1333,11 @@ published = source + "\n".join(
     (repo / name).read_text(encoding="utf-8")
     for name in ("README.md", "pyproject.toml", "tests/check.py")
 )
+# The operator's outgoing contact address is intentional public copy. Keep
+# every other institute address and host covered by the same leak guard.
+published_without_contact = published.replace("harshitsingh@iitb.ac.in", "")
 check(
-    _re.search(r"\.ac\.in", published) is None,
+    _re.search(r"\.ac\.in", published_without_contact) is None,
     "this repo names the institute's own domain",
 )
 
