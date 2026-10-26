@@ -2067,7 +2067,8 @@ def _build_asc(top) -> None:
                       plan=args.plan, resume=args.resume, refresh=args.refresh,
                       daily_ceiling=args.daily_ceiling))
     hidden(export, "dataset", choices=("running-courses", "bulletin", "slot-pattern",
-                                        "syllabus", "grading-statistics", "venue-occupancy"))
+                                        "syllabus", "grading-statistics", "venue-occupancy",
+                                        "academic-record-summary", "registration-status"))
     hidden(export, "--out", metavar="PATH", required=True)
     hidden(export, "--years", metavar="START:END", default=None)
     hidden(export, "--semesters", metavar="LIST", default=None)

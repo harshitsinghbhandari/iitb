@@ -318,6 +318,8 @@ ASC_EXPORT_HELP = """usage: iitb asc export <dataset> --out PATH [options]
 
 Collect ASC data into a UTF-8 CSV. Supported datasets are running-courses,
 bulletin, syllabus, grading-statistics, and slot-pattern.
+Academic-record-summary exports the operator's completed term CPI and
+credit totals from Academic Record. Registration-status reports unavailable.
 Running Courses covers every department group in the selected terms.
 Syllabus includes codes offered in those terms. Venue Occupancy currently
 reports unsupported because no populated cell shape has been verified.
