@@ -61,7 +61,8 @@ Reporting a failure: email harshitsingh@iitb.ac.in. Do not open a GitHub
 issue and do not paste the output into one. A useful report contains the
 operator's academic record, and a GitHub issue is public and permanent.
 
-Nothing is cached. Every invocation fetches live.
+Read commands fetch live. Export writes a local CSV and checkpoint so a
+collection can resume without repeating completed detail requests.
 
 This CLI only reads. It never registers, adjusts, drops or withdraws a
 course, changes a tag, submits an academic action, or signs the operator out. Where a
@@ -316,7 +317,10 @@ registration time.
 ASC_EXPORT_HELP = """usage: iitb asc export <dataset> --out PATH [options]
 
 Collect ASC data into a UTF-8 CSV. Supported datasets are running-courses,
-covering every department group in the selected terms, and slot-pattern.
+bulletin, syllabus, grading-statistics, and slot-pattern.
+Running Courses covers every department group in the selected terms.
+Syllabus includes codes offered in those terms. Venue Occupancy currently
+reports unsupported because no populated cell shape has been verified.
 Other dataset names are reserved and report an unsupported error until
 their page parsers are verified.
 
@@ -326,8 +330,12 @@ options:
                          Default: autumn,spring,summer through 2025,
                          then current autumn 2026.
   --departments LIST     Comma-separated group codes or name fragments.
-  --plan                 Read term groups and report the exact remaining
-                         course detail request count.
+                         Bulletin accepts one numeric department code.
+  --batches LIST         Bulletin batch years, comma-separated.
+  --programs LIST        Bulletin program names or codes, comma-separated.
+                         Default: every program offered by the selected batch.
+  --plan                 Read required indices and report the exact
+                         remaining detail request count.
   --resume               Continue a matching CSV and checkpoint.
   --refresh              Replace rows for every selected unit.
   --daily-ceiling N      At most N ASC data requests per day, max 1000.

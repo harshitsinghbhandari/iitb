@@ -500,6 +500,8 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
     ),
     311: ("asc_export_unsupported", 1,
           "This ASC CSV dataset is not supported by the installed core."),
+    312: ("asc_export_paused", 1,
+          "The ASC daily export ceiling was reached. Resume the CSV tomorrow."),
     497: (
         "core_incompatible",
         4,
