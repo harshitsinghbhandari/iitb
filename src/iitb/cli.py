@@ -1606,8 +1606,13 @@ def asc_login(args) -> dict:
     try:
         return core.call(ASC, "login", username=username, password=password)
     except CliError as exc:
-        # A credential-bearing call must never forward a runtime detail.
-        raise CliError(exc.code) from None
+        # Only the core's diagnostic file path may cross this credential seam.
+        diagnostic = (exc.detail if exc.code == 304 and exc.detail and
+                      re.fullmatch(
+                          r"ASC login diagnostic: /[^\r\n]*\.config/iitb/logs/"
+                          r"asc-login-[0-9]+-[0-9a-f]{12}\.json", exc.detail)
+                      else None)
+        raise CliError(exc.code, detail=diagnostic) from None
     except BaseException:
         raise CliError(499) from None
 
