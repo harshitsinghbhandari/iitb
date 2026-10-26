@@ -2059,6 +2059,24 @@ def _build_asc(top) -> None:
                     lambda args: asc_read("criteria", course=args.course))
     hidden(criteria, "--course", metavar="CODE", default=None)
 
+    export = make(sub, "export", asc_help.ASC_EXPORT_HELP,
+                  lambda args: asc_read("export", dataset=args.dataset, out=args.out,
+                      years=args.years, semesters=args.semesters,
+                      departments=args.departments, batches=args.batches,
+                      plan=args.plan, resume=args.resume, refresh=args.refresh,
+                      daily_ceiling=args.daily_ceiling))
+    hidden(export, "dataset", choices=("running-courses", "bulletin", "slot-pattern",
+                                        "syllabus", "grading-statistics", "venue-occupancy"))
+    hidden(export, "--out", metavar="PATH", required=True)
+    hidden(export, "--years", metavar="START:END", default=None)
+    hidden(export, "--semesters", metavar="LIST", default=None)
+    hidden(export, "--departments", metavar="LIST", default=None)
+    hidden(export, "--batches", metavar="LIST", default=None)
+    hidden(export, "--plan", action="store_true")
+    hidden(export, "--resume", action="store_true")
+    hidden(export, "--refresh", action="store_true")
+    hidden(export, "--daily-ceiling", type=positive_int, default=1000)
+
 
 # ----------------------------------------------------------------------
 # The envelope

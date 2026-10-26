@@ -22,6 +22,7 @@ commands:
                 program.
   prereqs       Course prerequisites and equivalences.
   criteria      Pre-registration criteria for the coming term.
+  export        Collect ASC data into a resumable CSV.
 
 Every command prints exactly one JSON object on stdout and nothing else.
   success:  {"ok": true, "data": ...}
@@ -310,4 +311,28 @@ about the operator's own eligibility. Do not report "you are eligible"
 from this alone; the CPI bands are here, but where the operator's own CPI
 stands is `iitb asc cpi`, and the final say is the portal's at
 registration time.
+"""
+
+ASC_EXPORT_HELP = """usage: iitb asc export <dataset> --out PATH [options]
+
+Collect ASC data into a UTF-8 CSV. Supported datasets are running-courses,
+covering every department group in the selected terms, and slot-pattern.
+Other dataset names are reserved and report an unsupported error until
+their page parsers are verified.
+
+options:
+  --years START:END      Academic starting years. Default: 2021 through 2026.
+  --semesters LIST       Comma-separated autumn,spring,summer,winter.
+                         Default: autumn,spring,summer through 2025,
+                         then current autumn 2026.
+  --departments LIST     Comma-separated group codes or name fragments.
+  --plan                 Read term groups and report the exact remaining
+                         course detail request count.
+  --resume               Continue a matching CSV and checkpoint.
+  --refresh              Replace rows for every selected unit.
+  --daily-ceiling N      At most N ASC data requests per day, max 1000.
+
+The command uses one ASC request at a time, about one per second. It saves
+progress after each group. A full multi-year export can take many requests;
+run --plan first. The checkpoint is written beside the CSV.
 """

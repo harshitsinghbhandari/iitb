@@ -498,6 +498,8 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
         "again in their own terminal. Never ask for their password or retry "
         "the same credential.",
     ),
+    311: ("asc_export_unsupported", 1,
+          "This ASC CSV dataset is not supported by the installed core."),
     497: (
         "core_incompatible",
         4,
