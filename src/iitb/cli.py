@@ -2039,6 +2039,23 @@ def _build_asc(top) -> None:
     hidden(catalog, "--year", metavar="YYYY", type=positive_int, default=None)
     hidden(catalog, "--semester", choices=("autumn", "spring", "summer", "winter"), default=None)
 
+    make(sub, "slot-pattern", asc_help.ASC_SLOT_PATTERN_HELP,
+         lambda args: asc_read("slot_pattern"))
+
+    gradestats = make(sub, "gradestats", asc_help.ASC_GRADESTATS_HELP,
+                      lambda args: asc_read("gradestats", code=args.code,
+                                            year=args.year, semester=args.semester))
+    hidden(gradestats, "code", metavar="CODE")
+    hidden(gradestats, "--year", metavar="YYYY", type=positive_int, default=None)
+    hidden(gradestats, "--semester", choices=("autumn", "spring", "project"), default=None)
+
+    bulletin = make(sub, "bulletin", asc_help.ASC_BULLETIN_HELP,
+                    lambda args: asc_read("bulletin", batch=args.batch,
+                                          program=args.program, semester=args.semester))
+    hidden(bulletin, "--batch", metavar="YYYY", type=positive_int, required=True)
+    hidden(bulletin, "--program", metavar="CODE", required=True)
+    hidden(bulletin, "--semester", choices=("autumn", "spring", "summer", "winter"), default=None)
+
     syllabus = make(sub, "syllabus", asc_help.ASC_SYLLABUS_HELP,
                     lambda args: asc_read("syllabus", code=args.code))
     hidden(syllabus, "code", metavar="<code>")

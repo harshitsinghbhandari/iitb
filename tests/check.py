@@ -649,7 +649,7 @@ def leaves(parser, path=()):
 
 
 tree = list(leaves(cli.build_parser()))
-check(len(tree) == 39, f"the tree has {len(tree)} leaves, expected 39")
+check(len(tree) == 42, f"the tree has {len(tree)} leaves, expected 42")
 for path in tree:
     status, text = run(*path, "--help")
     check(status == 0, f"iitb {' '.join(path)} --help: exit {status} != 0")
@@ -973,6 +973,9 @@ with tempfile.TemporaryDirectory() as home:
             ("asc", "timetable"): ["asc", "timetable"],
             ("asc", "attendance"): ["asc", "attendance"],
             ("asc", "catalog"): ["asc", "catalog"],
+            ("asc", "slot-pattern"): ["asc", "slot-pattern"],
+            ("asc", "gradestats"): ["asc", "gradestats", "XX 101"],
+            ("asc", "bulletin"): ["asc", "bulletin", "--batch", "2026", "--program", "0"],
             ("asc", "syllabus"): ["asc", "syllabus", "XX 101"],
             ("asc", "curriculum"): ["asc", "curriculum"],
             ("asc", "prereqs"): ["asc", "prereqs"],
