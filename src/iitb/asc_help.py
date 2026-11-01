@@ -17,6 +17,9 @@ commands:
   attendance    Your biometric attendance, per course and class date.
   catalog       Running courses for a term: department groups, or one
                 group's courses with --dept.
+  slot-pattern  The current institute slot grid.
+  gradestats    One course's grade distribution.
+  bulletin      Bulletin courses for one batch and program.
   syllabus      One course's catalogue entry.
   curriculum    The curriculum table, filterable by batch, department and
                 program.
@@ -235,8 +238,34 @@ Departments group in ways you may not expect: one group can hold several
 department codes, and the group is the unit this command works in. Run it
 without --dept first to see the grouping for the term.
 
-The per-course rows with --dept include the slot. "slotText" is verbatim
-and "slot" is the cleaned slot code.
+The per-course rows with --dept include every parsed Running Courses field,
+including instructors, venue, slot, division, limits, restrictions, and a
+course detail credit join. Current strength is unavailable on this page and
+is null in these rows. Bare catalog keeps its group summary.
+"""
+
+ASC_SLOT_PATTERN_HELP = """usage: iitb asc slot-pattern
+
+Read the current institute slot grid. The result contains one row per
+nonempty day and time cell, using the same parser as the slot CSV export.
+ASC does not give this grid an effective term.
+"""
+
+ASC_GRADESTATS_HELP = """usage: iitb asc gradestats CODE [--year YYYY]
+                              [--semester {autumn,spring,project}]
+
+Read one course's grade distribution. Without a term, search available
+grading results from newest to oldest and return the latest with data.
+With both selectors, return that exact result, including an empty result.
+The grade buckets use the grading statistics CSV parser.
+"""
+
+ASC_BULLETIN_HELP = """usage: iitb asc bulletin --batch YYYY --program CODE
+                            [--semester {autumn,spring,summer,winter}]
+
+Read Bulletin courses for one batch and program. Program accepts a code or
+the exact displayed name. The latest available curriculum year and semester
+are selected by default. Rows use the Bulletin CSV parser.
 """
 
 ASC_SYLLABUS_HELP = """usage: iitb asc syllabus <code>
