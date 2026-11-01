@@ -89,6 +89,7 @@ iitb mail        login, mailboxes, list, read, fetch
 iitb downloads   fetch, set-default
 iitb metrics
 iitb version
+iitb verify
 ```
 
 Some tasks it is built to answer:

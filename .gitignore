@@ -40,3 +40,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Written by the build with who a shared binary is for; never committed.
+src/iitb/_stamp.py

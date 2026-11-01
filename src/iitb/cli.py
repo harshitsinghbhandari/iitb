@@ -67,6 +67,7 @@ commands:
   metrics      Report how many times each iitb command has been run on this
                machine, and clear that record.
   version      Report the installed iitb and iitb-core versions.
+  verify       Report who this build of iitb was made for, and its terms.
 
 Every command prints exactly one JSON object on stdout and nothing else.
   success:  {"ok": true, "data": ...}
@@ -1078,6 +1079,20 @@ everywhere else: error 498 at exit 4, rather than a null version at exit 0.
 this command.
 """
 
+VERIFY_HELP = """
+usage: iitb verify
+
+Report who this build of iitb was made for, and the terms it was given on.
+
+  {"ok": true, "data": {"iitb": "<version>", "license": "...",
+                        "permissions": "...", "for": "<recipient>",
+                        "built_by": "..."}}
+
+A build handed to someone is stamped with their name at build time. A copy
+installed from source carries no stamp, and says so with "license",
+"permissions" and "for" all null rather than by failing.
+"""
+
 PLACEMENTS_DEADLINES_HELP = """
 usage: iitb placements deadlines [--within DURATION] [--eligible]
                                  [--include-applied]
@@ -1701,6 +1716,25 @@ def report_version(args) -> dict:
     return version_data()
 
 
+def report_verify(args) -> dict:
+    """The stamp a shared build was made with, or nulls for a source install.
+
+    `_stamp` is written by the build and never committed, so who a build is
+    for lives in the build and nowhere in this repo.
+    """
+    try:
+        from . import _stamp
+    except ImportError:
+        _stamp = None
+    return {
+        "iitb": installed("iitb") or "unknown",
+        "license": getattr(_stamp, "LICENSE", None),
+        "permissions": getattr(_stamp, "PERMISSIONS", None),
+        "for": getattr(_stamp, "RECIPIENT", None),
+        "built_by": "The Goat, Harshit Singh Bhandari",
+    }
+
+
 def report_metrics(args) -> dict:
     """The local run counts, or what clearing them threw away.
 
@@ -1860,6 +1894,7 @@ def build_parser() -> Parser:
     hidden(counts, "--reset", action="store_true")
 
     make(top, "version", VERSION_HELP, report_version)
+    make(top, "verify", VERIFY_HELP, report_verify)
     return root
 
 
