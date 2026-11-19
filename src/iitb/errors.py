@@ -502,6 +502,8 @@ REGISTRY: dict[int, tuple[str, int, str]] = {
           "This ASC CSV dataset is not supported by the installed core."),
     312: ("asc_export_paused", 1,
           "The shared ASC daily request ceiling was reached. The detail reports the active ceiling. Resume tomorrow."),
+    313: ("asc_page_redirected", 1,
+          "ASC redirected this read to another page. The detail identifies the redirect or account access restriction."),
     497: (
         "core_incompatible",
         4,
