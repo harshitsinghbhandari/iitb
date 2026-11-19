@@ -231,6 +231,7 @@ check(
 # --- core exception names map to codes without importing the core -----------
 
 for class_name, expected in [
+    ("ASCPageRedirected", 313),
     ("BrowserUnavailable", 104),
     ("SSOCheckFailed", 170),
     # A subclass of BrowserUnavailable in the core, and still its own code
