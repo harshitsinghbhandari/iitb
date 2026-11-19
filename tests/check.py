@@ -42,7 +42,7 @@ failures: list[str] = []
 # A redirect that each section has to remember is one a later section will
 # forget, and the way that failure announces itself is a wrong number in
 # somebody's real state directory rather than a failing check. The sections
-# below that set HOME for their own reasons still work: they save and restore
+# below that set the home for their own reasons still work: they save and restore
 # whatever they found, which is now this scratch directory.
 #
 # ~/.config/iitb/ is derived from the home directory and from nothing else, so
@@ -50,8 +50,9 @@ failures: list[str] = []
 # the counter.
 _scratch = tempfile.TemporaryDirectory()
 atexit.register(_scratch.cleanup)
-REAL_HOME = os.environ.get("HOME")
-os.environ["HOME"] = _scratch.name
+HOME_ENV = "USERPROFILE" if os.name == "nt" else "HOME"
+REAL_HOME = os.environ.get(HOME_ENV)
+os.environ[HOME_ENV] = _scratch.name
 
 
 # Exactly the files this repo's own code writes, and no others. The state
@@ -737,8 +738,8 @@ finally:
 # commands read it with, and each of the three fetches that consume it.
 
 with tempfile.TemporaryDirectory() as home:
-    real_home = os.environ.get("HOME")
-    os.environ["HOME"] = home
+    real_home = os.environ.get(HOME_ENV)
+    os.environ[HOME_ENV] = home
     try:
         from iitb import config
 
@@ -865,9 +866,9 @@ with tempfile.TemporaryDirectory() as home:
             check(exc.code == 190, f"unreadable settings raised {exc.code}, not 190")
     finally:
         if real_home is None:
-            os.environ.pop("HOME", None)
+            os.environ.pop(HOME_ENV, None)
         else:
-            os.environ["HOME"] = real_home
+            os.environ[HOME_ENV] = real_home
 
 # --- metrics: local counts that cannot leak and cannot break a command -----
 # Four properties, and every one of them is the feature rather than a detail
@@ -886,8 +887,8 @@ def raw(*argv):
 
 
 with tempfile.TemporaryDirectory() as home:
-    real_home = os.environ.get("HOME")
-    os.environ["HOME"] = home
+    real_home = os.environ.get(HOME_ENV)
+    os.environ[HOME_ENV] = home
     os.environ.pop(metrics.OPT_OUT, None)
     counter = Path(home) / ".config" / "iitb" / "metrics.json"
     canonical_call = core.call
@@ -1179,9 +1180,9 @@ with tempfile.TemporaryDirectory() as home:
         core.call = canonical_call
         os.environ.pop(metrics.OPT_OUT, None)
         if real_home is None:
-            os.environ.pop("HOME", None)
+            os.environ.pop(HOME_ENV, None)
         else:
-            os.environ["HOME"] = real_home
+            os.environ[HOME_ENV] = real_home
 
 # Counting is local, and the only guard that can say so in a public file is
 # the shape one: this module may not name a url, a host, or anything that
@@ -1264,8 +1265,8 @@ for label, raised in [
     ("a bare non-zero exit", SystemExit(7)),
 ]:
     with tempfile.TemporaryDirectory() as home:
-        real_home = os.environ.get("HOME")
-        os.environ["HOME"] = home
+        real_home = os.environ.get(HOME_ENV)
+        os.environ[HOME_ENV] = home
         canonical = cli.report_version
         try:
             def explode(args, _raised=raised):
@@ -1276,9 +1277,9 @@ for label, raised in [
         finally:
             cli.report_version = canonical
             if real_home is None:
-                os.environ.pop("HOME", None)
+                os.environ.pop(HOME_ENV, None)
             else:
-                os.environ["HOME"] = real_home
+                os.environ[HOME_ENV] = real_home
 
         check(isinstance(body, dict), f"{label}: stdout is not one JSON object")
         error = body.get("error", {}) if isinstance(body, dict) else {}
@@ -1419,8 +1420,8 @@ check(
     "entirely against the scratch home set at the top of this file",
 )
 check(
-    REAL_HOME is None or os.environ.get("HOME") != REAL_HOME,
-    "this check finished with HOME back on the operator's own directory, so "
+    REAL_HOME is None or os.environ.get(HOME_ENV) != REAL_HOME,
+    "this check finished with the home back on the operator's own directory, so "
     "anything added after this line would dispatch against their real state",
 )
 
