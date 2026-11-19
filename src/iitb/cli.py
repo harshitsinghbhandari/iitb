@@ -2069,7 +2069,9 @@ def _build_asc(top) -> None:
 
     catalog = make(sub, "catalog", asc_help.ASC_CATALOG_HELP,
                    lambda args: asc_read("catalog", dept=args.dept,
-                                         year=args.year, semester=args.semester))
+                                         year=args.year, semester=args.semester,
+                                         brief=args.brief))
+    hidden(catalog, "--brief", action="store_true")
     hidden(catalog, "--dept", metavar="TEXT", default=None)
     hidden(catalog, "--year", metavar="YYYY", type=positive_int, default=None)
     hidden(catalog, "--semester", choices=("autumn", "spring", "summer", "winter"), default=None)
@@ -2130,7 +2132,7 @@ def _build_asc(top) -> None:
     hidden(export, "--plan", action="store_true")
     hidden(export, "--resume", action="store_true")
     hidden(export, "--refresh", action="store_true")
-    hidden(export, "--daily-ceiling", type=positive_int, default=1000)
+    hidden(export, "--daily-ceiling", type=positive_int, default=10000)
 
 
 # ----------------------------------------------------------------------

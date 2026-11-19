@@ -214,7 +214,7 @@ issue, a pull request, or any shared log.
 """
 
 ASC_CATALOG_HELP = """usage: iitb asc catalog [--dept TEXT] [--year YYYY]
-                        [--semester {autumn,spring,summer,winter}]
+                        [--semester {autumn,spring,summer,winter}] [--brief]
 
 Running courses for a term.
 
@@ -228,6 +228,9 @@ options:
       and its name, case-insensitively. If TEXT matches more than one group
       the command fails and lists them rather than picking one; a department
       code can genuinely belong to two groups.
+  --brief
+      With --dept, skip the per-course detail join. Fetch one Running Courses
+      page per group and return its parsed rows. Credits may be null.
   --year YYYY
       Academic year by its starting year: 2026 means 2026-27.
       Default: the current term.
@@ -241,7 +244,12 @@ without --dept first to see the grouping for the term.
 The per-course rows with --dept include every parsed Running Courses field,
 including instructors, venue, slot, division, limits, restrictions, and a
 course detail credit join. Current strength is unavailable on this page and
-is null in these rows. Bare catalog keeps its group summary.
+is null in these rows. --brief skips the credit join. Bare catalog keeps
+its group summary.
+
+Catalog group and detail reads share one daily request counter with export
+and other counted ASC reads. The default ceiling is 10,000 requests per day;
+reads are paced at about one request per second.
 """
 
 ASC_SLOT_PATTERN_HELP = """usage: iitb asc slot-pattern
@@ -369,9 +377,12 @@ options:
                          remaining detail request count.
   --resume               Continue a matching CSV and checkpoint.
   --refresh              Replace rows for every selected unit.
-  --daily-ceiling N      At most N ASC data requests per day, max 1000.
+  --daily-ceiling N      At most N ASC data requests per day.
+                         Default and maximum: 10,000.
 
-The command uses one ASC request at a time, about one per second. It saves
-progress after each group. A full multi-year export can take many requests;
+Export shares one daily request counter with catalog group and detail reads
+and other counted ASC reads. --daily-ceiling limits that shared daily total
+for this command. The command uses one ASC request at a time, about one per
+second. It saves progress after each group. A full multi-year export can take many requests;
 run --plan first. The checkpoint is written beside the CSV.
 """
