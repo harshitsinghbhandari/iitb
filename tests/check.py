@@ -1310,6 +1310,41 @@ finally:
 check(isinstance(body, dict), "an unserialisable payload did not print one object")
 check(status == 1, f"an unserialisable payload exited {status}, not 1")
 
+# ASC catalog options cross the shell/core seam without portal data here.
+canonical_call = core.call
+asc_calls = []
+try:
+    core.call = lambda *a, **k: asc_calls.append((a, k)) or {}
+    for brief in (False, True):
+        argv = ["asc", "catalog", "--dept", "XX", "--year", "2026",
+                "--semester", "autumn"] + (["--brief"] if brief else [])
+        status, body = run(*argv)
+        check(status == 0, "catalog options did not dispatch")
+        check(asc_calls[-1] == (("iitb_core.asc", "catalog"), {
+            "dept": "XX", "year": 2026, "semester": "autumn", "brief": brief}),
+            f"catalog options reached core as {asc_calls[-1]!r}")
+    for extra, expected in (([], 10000), (["--daily-ceiling", "10000"], 10000),
+                            (["--daily-ceiling", "25"], 25)):
+        status, body = run("asc", "export", "running-courses", "--out", "unused", *extra)
+        check(status == 0 and asc_calls[-1][1]["daily_ceiling"] == expected,
+              "export daily ceiling was not forwarded")
+    def paused(*a, **k):
+        raise CliError(312, detail="ASC daily request ceiling of 25 reached; resume tomorrow")
+    core.call = paused
+    status, body = run("asc", "catalog", "--dept", "XX", "--brief")
+    check(status == 1 and body.get("error", {}).get("code") == 312,
+          "catalog ceiling failure lost error 312")
+    check("25" in body.get("error", {}).get("detail", ""),
+          "ceiling failure lost the active ceiling")
+finally:
+    core.call = canonical_call
+for command in ("catalog", "export"):
+    status, help_text = run("asc", command, "--help")
+    check("10,000" in help_text and "one daily request counter" in help_text,
+          f"{command} help omits the shared daily budget")
+check("--brief" in cli.asc_help.ASC_CATALOG_HELP, "catalog help omits --brief")
+
+
 # --- a CliError carries detail only when there is one ----------------------
 
 check("detail" not in CliError(103).as_error(), "an empty detail should be dropped")
